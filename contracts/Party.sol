@@ -95,11 +95,12 @@ contract Party is ReentrancyGuard {
         address delegateKey; // the key responsible for submitting proposals and voting - defaults to member address unless updated
         uint256 shares; // the # of voting shares assigned to this member
         uint256 loot; // the loot amount available to this member (combined with shares on ragequit)
-        uint256 interest; //interest earned by member
-        bool exists; // always true once a member has been created
-        uint256 founder; // 1 if true
+        uint256 earnings; //interest earned by member
+        uint256 redeemedEarnings; //interest withdrawn 
         uint256 highestIndexYesVote; // highest proposal index # on which the member voted YES
         uint256 jailed; // set to proposalIndex of a passing guild kick proposal for this member, prevents voting on and sponsoring proposals
+        bool exists; // always true once a member has been created
+
     }
 
     struct Proposal {
@@ -177,11 +178,6 @@ contract Party is ReentrancyGuard {
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
         emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDeposit, _dilutionBound, _processingReward, _depositRate, _partyGoal, _name, _manifesto);
         
-        for (uint256 i = 0; i < _founders.length; i++) {
-            members[_founders[i]] = Member(_founders[i], 0, 0, 0, true, 1, 0, 0);
-            memberAddressByDelegateKey[_founders[i]] = _founders[i];
-            
-        }
 
         for (uint256 i = 0; i < _approvedTokens.length; i++) {
             require(!tokenWhitelist[_approvedTokens[i]], "token duplicated");
@@ -202,18 +198,26 @@ contract Party is ReentrancyGuard {
         manifesto = _manifesto;
         status = NOT_SET;
         
+        _addFounders(_founders); //had to move to internal function to avoid stack to deep issue 
         _setIdle(_idleToken);
     }
     
-    function setMinion(address _minion) public nonReentrant {
-        require(status != SET, "already set");
-        minion = _minion;
-        status = SET; // locks minion for moloch contract set on summoning
+    /****************
+    SUMMONING FUNCTIONS
+    ****************/
+    
+    function _addFounders(address[] memory _founders) internal nonReentrant {
+            for (uint256 i = 0; i < _founders.length; i++) {
+            members[_founders[i]] = Member(_founders[i], 0, 0, 0, 0, 0, 0, true);
+            memberAddressByDelegateKey[_founders[i]] = _founders[i];
+        }
     }
+    
     
     function _setIdle(address _idleToken) internal nonReentrant {
         idleToken = IIdleToken(_idleToken);
     }
+    
     
     function makeDeposit(uint256 tribute) public nonReentrant {
         require(members[msg.sender].exists == true, "not member");
@@ -234,28 +238,25 @@ contract Party is ReentrancyGuard {
         emit MakeDeposit(msg.sender, tribute, shares);
     }
     
-    function makePayment(address paymentToken, uint256 payment) public nonReentrant {
-        require(tokenWhitelist[paymentToken], "payment token not whitelisted");
-        require(IERC20(paymentToken).transferFrom(msg.sender, address(this), payment), "transfer failed");
-        
-        if (userTokenBalances[GUILD][paymentToken] == 0 && payment > 0) {
-            totalGuildBankTokens += 1;
-        }
-        
-        unsafeAddToBalance(GUILD, paymentToken, payment);
-        
-        emit MakePayment(msg.sender, paymentToken, payment);
-    }
     
     /****************
     MINION GOVERNANCE
     ****************/
+    
+    function setMinion(address _minion) public nonReentrant {
+        require(status != SET, "already set");
+        minion = _minion;
+        status = SET; // locks minion for moloch contract set on summoning
+    }
+    
     function amendGovernance(
         address _newToken,
+        address _idleToken,
         address _minion,
         uint256 _depositRate,
         bytes32 _manifesto
-    ) public nonReentrant {
+    ) external nonReentrant {
+        require(msg.sender == address(minion), "only minion can make these changes!");
         
         minion = _minion;
         depositRate = _depositRate;
@@ -263,6 +264,10 @@ contract Party is ReentrancyGuard {
         
         if(_newToken != address(0)) {
             approvedTokens.push(_newToken);
+        }
+        
+        if(_idleToken != address(0)) {
+            _setIdle(_idleToken);
         }
         
         emit AmendGovernance(_newToken, minion, depositRate, manifesto);
@@ -465,7 +470,7 @@ contract Party is ReentrancyGuard {
                 }
 
                 // use applicant address as delegateKey by default
-                members[proposal.applicant] = Member(proposal.applicant, proposal.sharesRequested, proposal.lootRequested, 0, true, 1, 0, 0);
+                members[proposal.applicant] = Member(proposal.applicant, proposal.sharesRequested, proposal.lootRequested, 0, 0, 0, 0, true);
                 memberAddressByDelegateKey[proposal.applicant] = proposal.applicant;
             }
 
@@ -613,19 +618,27 @@ contract Party is ReentrancyGuard {
         _withdrawBalance(token, amount);
     }
     
-    function withdrawInterest(address _idleToken) external nonReentrant {
+    function withdrawInterest() external nonReentrant {
         require(members[msg.sender].exists == true, "not member");
-        require(getUserInterest(_idleToken) > 0, "no interest to withdrawal");
+        require(getUserInterest() > 0, "no interest to withdrawal");
+        
+        /*
+        / need to set user earnings to x 
+        / compare current user earnings to past user earnings to see if delta 
+        */
     
-        uint256 withdrawalAmt = getUserInterest(_idleToken);
+        uint256 withdrawalAmt = getUserInterest();
+    
+        idleToken.redeemIdleToken(withdrawalAmt, false, new uint256[](0));
+        //@dev should there be an IERC require function for the idleToken address to make sure DAI is transfered back to Party? 
+        unsafeAddToBalance([GUILD], depositToken, withdrawalAmt);
+        unsafeInternalTransfer([GUILD], [msg.sender], depositToken, withdrawalAmt);
+
         
-        address idleDAI = IIdleToken.at(_idleToken);
-        
-        idleDAI(IIdleToken.redeemIdleToken(withdrawalAmt, false, 0));
-        
-        _withdrawBalance(_idleToken, withdrawalAmt);
+        _withdrawBalance(depositToken, withdrawalAmt);
     }
 
+    // @ dev could cut this function in needed
     function withdrawBalances(address[] memory tokens, uint256[] memory amounts, bool max) public nonReentrant {
         require(tokens.length == amounts.length, "tokens + amounts arrays must match");
 
@@ -655,6 +668,20 @@ contract Party is ReentrancyGuard {
         
         unsafeAddToBalance(GUILD, token, amountToCollect);
         emit TokensCollected(token, amountToCollect);
+    }
+    
+    //gives DAO ability to accept payments 
+    function makePayment(address paymentToken, uint256 payment) public nonReentrant {
+        require(tokenWhitelist[paymentToken], "payment token not whitelisted");
+        require(IERC20(paymentToken).transferFrom(msg.sender, address(this), payment), "transfer failed");
+        
+        if (userTokenBalances[GUILD][paymentToken] == 0 && payment > 0) {
+            totalGuildBankTokens += 1;
+        }
+        
+        unsafeAddToBalance(GUILD, paymentToken, payment);
+        
+        emit MakePayment(msg.sender, paymentToken, payment);
     }
 
     // NOTE: requires that delegate key which sent the original proposal cancels, msg.sender == proposal.proposer
@@ -734,17 +761,18 @@ contract Party is ReentrancyGuard {
     HELPER FUNCTIONS
     ***************/
     
-    function getUserInterest(address _idleToken) public returns (uint256) {
+    function getUserInterest() public returns (uint256) {
         
-        uint256 userBalance = IERC20(_idleToken).balanceOf(address(this));
-        uint256 avgCost = userBalance.mul(IIdleToken(_idleToken).userAvgPrices(address(this))).div(10**18);
-        uint256 currentValue = userBalance.mul(IIdleToken(_idleToken).tokenPrice()).div(10**18);
+        uint256 userBalance = IERC20(address(idleToken)).balanceOf(address(this));
+        uint256 avgCost = userBalance.mul(IIdleToken(idleToken).userAvgPrices(address(this))).div(10**18);
+        uint256 currentValue = userBalance.mul(IIdleToken(idleToken).tokenPrice()).div(10**18);
         uint256 earnings = currentValue.sub(avgCost);
         uint256 shares = members[msg.sender].shares.add(members[msg.sender].loot);
       
         
         uint256 totalSharesAndLoot = totalShares.add(totalLoot);
         uint256 memberPercent = shares.div(totalSharesAndLoot);
+        
         
         return earnings.mul(memberPercent);
        
