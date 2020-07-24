@@ -17,6 +17,7 @@ contract PartyStarter {
     function startParty(
         address[] memory _founders,
         address[] memory _approvedTokens,
+        address _idleToken,
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
         uint256 _gracePeriodLength,
@@ -25,13 +26,12 @@ contract PartyStarter {
         uint256 _processingReward,
         uint256 _depositRate,
         uint256 _partyGoal,
-        address _idleContract,
-        bytes32 _name, 
-        bytes32 _manifesto
+        bytes32 _name
     ) public {
         party = new Party(
             _founders,
             _approvedTokens,
+            _idleToken,
             _periodDuration,
             _votingPeriodLength,
             _gracePeriodLength,
@@ -39,10 +39,8 @@ contract PartyStarter {
             _dilutionBound,
             _processingReward, 
             _depositRate,
-            _partyGoal,
-            _idleContract, // needs to be set based on DAI vs. USDC on front-end
-            _name, 
-            _manifesto);
+            _partyGoal, 
+            _name);
         
         minionSummoner.summonMinion(address(party), _approvedTokens[0]);// summons minion for new moloch
         emit PartyStarted(address(party));

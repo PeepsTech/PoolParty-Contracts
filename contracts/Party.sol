@@ -41,8 +41,7 @@ contract Party is ReentrancyGuard {
     address public depositToken; // deposit token contract reference; default = periodDuration
     address public minion; // contract that allows execution of arbitrary calls voted on by members // gov. param adjustments
     bytes32 public name; 
-    bytes32 public manifesto; // public manifesto data (e.g., credo, company charter, operating agreement, membership terms)
-    
+
 
     // HARD-CODED LIMITS
     // These numbers are quite arbitrary; they are small enough to avoid overflows when doing calculations
@@ -54,10 +53,10 @@ contract Party is ReentrancyGuard {
     // ***************
     // EVENTS
     // ***************
-    event SummonComplete(address[] indexed summoners, address[] tokens, uint256 summoningTime, uint256 periodDuration, uint256 votingPeriodLength, uint256 gracePeriodLength, uint256 proposalDeposit, uint256 dilutionBound, uint256 processingReward, uint256 partyGoal, uint256 depositRate, bytes32 name, bytes32 manifesto);
+    event SummonComplete(address[] indexed summoners, address[] tokens, uint256 summoningTime, uint256 periodDuration, uint256 votingPeriodLength, uint256 gracePeriodLength, uint256 proposalDeposit, uint256 dilutionBound, uint256 processingReward, uint256 partyGoal, uint256 depositRate, bytes32 name);
     event MakeDeposit(address indexed memberAddress, uint256 indexed tribute, uint256 indexed shares);
     event MakePayment(address indexed sender, address indexed paymentToken, uint256 indexed payment);
-    event AmendGovernance(address indexed newToken, address indexed minion, uint256 depositRate, bytes32 manifesto);
+    event AmendGovernance(address indexed newToken, address indexed minion, uint256 depositRate);
     event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[6] flags, uint256 proposalId, address indexed delegateKey, address indexed memberAddress);
     event ProposalIndex(uint256 proposalIndex);
     event SubmitVote(uint256 proposalId, uint256 indexed proposalIndex, address indexed delegateKey, address indexed memberAddress, uint8 uintVote);
@@ -164,8 +163,7 @@ contract Party is ReentrancyGuard {
         uint256 _processingReward,
         uint256 _depositRate,
         uint256 _partyGoal,
-        bytes32 _name, 
-        bytes32 _manifesto
+        bytes32 _name
     ) public {
         require(_periodDuration > 0, "_periodDuration zeroed");
         require(_votingPeriodLength > 0, "_votingPeriodLength zeroed");
@@ -176,7 +174,7 @@ contract Party is ReentrancyGuard {
         
         depositToken = _approvedTokens[0];
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
-        emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDeposit, _dilutionBound, _processingReward, _depositRate, _partyGoal, _name, _manifesto);
+        emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDeposit, _dilutionBound, _processingReward, _depositRate, _partyGoal, _name);
         
 
         for (uint256 i = 0; i < _approvedTokens.length; i++) {
@@ -195,7 +193,6 @@ contract Party is ReentrancyGuard {
         partyGoal = _partyGoal;
         summoningTime = now;
         name = _name;
-        manifesto = _manifesto;
         status = NOT_SET;
         
         _addFounders(_founders); //had to move to internal function to avoid stack to deep issue 
@@ -253,14 +250,12 @@ contract Party is ReentrancyGuard {
         address _newToken,
         address _idleToken,
         address _minion,
-        uint256 _depositRate,
-        bytes32 _manifesto
+        uint256 _depositRate
     ) external nonReentrant {
         require(msg.sender == address(minion), "only minion can make these changes!");
         
         minion = _minion;
         depositRate = _depositRate;
-        manifesto = _manifesto;
         
         if(_newToken != address(0)) {
             approvedTokens.push(_newToken);
@@ -270,7 +265,7 @@ contract Party is ReentrancyGuard {
             _setIdle(_idleToken);
         }
         
-        emit AmendGovernance(_newToken, minion, depositRate, manifesto);
+        emit AmendGovernance(_newToken, minion, depositRate);
     }
 
     /*****************
@@ -391,7 +386,7 @@ contract Party is ReentrancyGuard {
     }
 
 
-    // NOTE: In PoolParty we only use propoal proposalId
+    // NOTE: In PoolParty we only use propoal proposalId = proposalIndex
     function submitVote(uint256 proposalIndex, uint8 uintVote) public nonReentrant onlyDelegate {
         address memberAddress = memberAddressByDelegateKey[msg.sender];
         Member storage member = members[memberAddress];
@@ -484,6 +479,10 @@ contract Party is ReentrancyGuard {
             }
 
             unsafeInternalTransfer(ESCROW, GUILD, proposal.tributeToken, proposal.tributeOffered);
+            if (proposal.tributeToken == depositToken) {
+                depositToIdle(proposal.tributeToken, proposal.tributeOffered);
+            }
+            
             unsafeInternalTransfer(GUILD, proposal.applicant, proposal.paymentToken, proposal.paymentRequested);
 
             // if the proposal spends 100% of guild bank balance for a token, decrement total guild bank tokens
@@ -631,11 +630,9 @@ contract Party is ReentrancyGuard {
     
         idleToken.redeemIdleToken(withdrawalAmt, false, new uint256[](0));
         //@dev should there be an IERC require function for the idleToken address to make sure DAI is transfered back to Party? 
-        unsafeAddToBalance([GUILD], depositToken, withdrawalAmt);
-        unsafeInternalTransfer([GUILD], [msg.sender], depositToken, withdrawalAmt);
-
+        unsafeAddToBalance(GUILD, depositToken, withdrawalAmt);
+        unsafeInternalTransfer(GUILD, msg.sender, depositToken, withdrawalAmt);
         
-        _withdrawBalance(depositToken, withdrawalAmt);
     }
 
     // @ dev could cut this function in needed
@@ -775,7 +772,25 @@ contract Party is ReentrancyGuard {
         
         
         return earnings.mul(memberPercent);
-       
+    }
+    
+    function depositToIdle(address token, uint256 amount) internal {
+        require(token == depositToken, "not able to deposit in idle");
+        require(amount != 0, "no tokens to deposit");
+        require(IERC20(address(idleToken)).approve(address(this), amount), 'approval failed');
+        
+        IIdleToken(idleToken).mintIdleToken(amount, true);
+        
+        uint256 mintedTokens = IERC20(address(idleToken)).balanceOf(address(this));
+
+        unsafeSetGuildBalance(address(idleToken), mintedTokens);
+        
+    }
+    
+    function unsafeSetGuildBalance(address token, uint256 amount) internal {
+        userTokenBalances[TOTAL][token] - userTokenBalances[GUILD][token];
+        userTokenBalances[GUILD][token] = amount;
+        userTokenBalances[TOTAL][token] += amount;
     }
     
     function unsafeAddToBalance(address user, address token, uint256 amount) internal {
