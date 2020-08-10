@@ -1,48 +1,41 @@
 pragma solidity 0.5.17;
 
 import "./PoolParty.sol";
-import "./ISummonMinion.sol";
 
 contract PartyStarter {
     Party private party;
-    ISummonMinion public minionSummoner;
-    
-    event PartyStarted(address indexed party);
 
-    constructor(address _minionSummoner) public { // locks minionSummoner to contract set
-        minionSummoner = ISummonMinion(_minionSummoner);
-        minionSummoner.setMolochSummoner(address(this));
-    }
+    
+    event PartyStarted(address indexed party, address[] indexed _founders, address[] indexed _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDeposit, uint256 summoningTime);
 
     function startParty(
         address[] memory _founders,
-        address[] memory _approvedTokens,
-        address _idleToken,
+        address[] memory _approvedTokens, //deposit token in 0, idleToken in 1
+        address _daoFees,
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
         uint256 _gracePeriodLength,
         uint256 _proposalDeposit,
-        uint256 _dilutionBound,
-        uint256 _processingReward,
         uint256 _depositRate,
         uint256 _partyGoal,
-        bytes32 _name
+        bytes32 _name,
+        bytes32 _desc
     ) public {
         party = new Party(
             _founders,
             _approvedTokens,
-            _idleToken,
+            _daoFees,
             _periodDuration,
             _votingPeriodLength,
             _gracePeriodLength,
             _proposalDeposit,
-            _dilutionBound,
-            _processingReward, 
             _depositRate,
-            _partyGoal, 
-            _name);
+            _partyGoal,
+            _name,
+            _desc);
+            
+        uint256 summoningTime = now;     
         
-        minionSummoner.summonMinion(address(party), _approvedTokens[0]);// summons minion for new moloch
-        emit PartyStarted(address(party));
+        emit PartyStarted(address(party), _founders, _approvedTokens, _daoFees, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDeposit, summoningTime);
     }
 }
