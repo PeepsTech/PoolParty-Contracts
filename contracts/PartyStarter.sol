@@ -1,6 +1,6 @@
 pragma solidity 0.5.17;
 
-import "./PoolParty.sol";
+import "./Party.sol";
 
 contract PartyStarter {
     Party private party;

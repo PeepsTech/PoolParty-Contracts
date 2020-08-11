@@ -19,10 +19,7 @@
  */
 
 const HDWalletProvider = require('@truffle/hdwallet-provider');
-const infuraKey = "ae3b0e00d49d49a4a1c6f5e70e66f243";
-
-const fs = require('fs');
-const mnemonic = fs.readFileSync(".secret").toString().trim();
+require('dotenv').config() 
 
 module.exports = {
   /**
@@ -50,21 +47,19 @@ module.exports = {
 
     // Useful for deploying to a public network.
     // NB: It's important to wrap the provider as a function.
-     rinkeby: {
-       provider: () => new HDWalletProvider(mnemonic, `https://rinkeby.infura.io/v3/15f54146bc594f10a1db67c35275579a`),
-       network_id: 4,       // Ropsten's id
-       gas: 7500000,        // Ropsten has a lower block limit than mainnet
-       confirmations: 8,    // # of confs to wait between deployments. (default: 0)
-       timeoutBlocks: 200,  // # of blocks before a deployment times out  (minimum/default: 50)
-       skipDryRun: true     // Skip dry run before migrations? (default: false for public nets )
-      },
+    rinkeby: {
+      provider: () => new HDWalletProvider(process.env.MNENOMIC, "https://rinkeby.infura.io/v3/" + process.env.INFURA_API_KEY),
+      network_id: 4,
+      gas: 3000000,
+      gasPrice: 10000000000
+    },
 
-    // Useful for private networks
-    // private: {
-      // provider: () => new HDWalletProvider(mnemonic, `https://network.io`),
-      // network_id: 2111,   // This network is yours, in the cloud.
-      // production: true    // Treats this network as if it was a public net. (default: false)
-    // }
+    main: {
+      provider: () => new HDWalletProvider(process.env.MNENOMIC, "https://mainnet.infura.io/v3/" + process.env.INFURA_API_KEY),
+      network_id: 1,
+      gas: 3000000,
+      gasPrice: 10000000000
+    }
   },
 
   // Set default mocha options here, use special reporters etc.

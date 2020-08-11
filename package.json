@@ -1,0 +1,26 @@
+{
+  "name": "pool-party",
+  "version": "1.0.0",
+  "description": "Pool Party smart contracts",
+  "main": "truffle-config.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PeepsTech/PoolParty-Contracts.git"
+  },
+  "author": "Peeps Democracy",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/PeepsTech/PoolParty-Contracts/issues"
+  },
+  "homepage": "https://github.com/PeepsTech/PoolParty-Contracts#readme",
+  "dependencies": {
+    "@truffle/hdwallet-provider": "^1.0.42",
+    "dotenv": "^8.2.0"
+  }
+}
