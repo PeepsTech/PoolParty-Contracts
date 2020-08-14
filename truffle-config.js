@@ -18,9 +18,11 @@
  *
  */
 
+
+
 const HDWalletProvider = require('@truffle/hdwallet-provider');
 require('dotenv').config() 
-
+const mnenomic = "concert load couple harbor equip island argue ramp clarify fence smart topic"; //autogen seed phrase
 module.exports = {
   /**
    * Networks define how you connect to your ethereum client and let you set the
@@ -32,6 +34,9 @@ module.exports = {
    * $ truffle test --network <network-name>
    */
 
+
+
+
   networks: {
     // Useful for testing. The `development` name is special - truffle uses it by default
     // if it's defined here and no other network is specified at the command line.
@@ -41,25 +46,15 @@ module.exports = {
     //
      development: {
       host: "127.0.0.1",     // Localhost (default: none)
-      port: 8545,            // Standard Ethereum port (default: none)
+      port: 7545,            // Standard Ethereum port (default: none)
       network_id: "*",       // Any network (default: none)
+      provider: () => new HDWalletProvider(mnenomic, "https://mainnet.infura.io/v3/<infura>"),
+      from: "0x7136fbDdD4DFfa2369A9283B6E90A040318011Ca"
      },
 
     // Useful for deploying to a public network.
-    // NB: It's important to wrap the provider as a function.
-    rinkeby: {
-      provider: () => new HDWalletProvider(process.env.MNENOMIC, "https://rinkeby.infura.io/v3/" + process.env.INFURA_API_KEY),
-      network_id: 4,
-      gas: 3000000,
-      gasPrice: 10000000000
-    },
+    // NB: It's important to wrap the provider as a function
 
-    main: {
-      provider: () => new HDWalletProvider(process.env.MNENOMIC, "https://mainnet.infura.io/v3/" + process.env.INFURA_API_KEY),
-      network_id: 1,
-      gas: 3000000,
-      gasPrice: 10000000000
-    }
   },
 
   // Set default mocha options here, use special reporters etc.

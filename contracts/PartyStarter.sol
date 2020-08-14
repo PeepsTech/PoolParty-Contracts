@@ -6,7 +6,7 @@ contract PartyStarter {
     Party private party;
 
     
-    event PartyStarted(address indexed party, address[] indexed _founders, address[] indexed _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDeposit, uint256 summoningTime);
+    event PartyStarted(address indexed party, address[] indexed _founders, address[] indexed _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDepositReward, uint256 summoningTime);
 
     function startParty(
         address[] memory _founders,
@@ -15,7 +15,7 @@ contract PartyStarter {
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
         uint256 _gracePeriodLength,
-        uint256 _proposalDeposit,
+        uint256 _proposalDepositReward,
         uint256 _depositRate,
         uint256 _partyGoal,
         bytes32 _name,
@@ -28,7 +28,7 @@ contract PartyStarter {
             _periodDuration,
             _votingPeriodLength,
             _gracePeriodLength,
-            _proposalDeposit,
+            _proposalDepositReward,
             _depositRate,
             _partyGoal,
             _name,
@@ -36,6 +36,6 @@ contract PartyStarter {
             
         uint256 summoningTime = now;     
         
-        emit PartyStarted(address(party), _founders, _approvedTokens, _daoFees, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDeposit, summoningTime);
+        emit PartyStarted(address(party), _founders, _approvedTokens, _daoFees, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, summoningTime);
     }
 }
