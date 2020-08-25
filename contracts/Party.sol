@@ -57,8 +57,8 @@ contract Party is ReentrancyGuard {
     event MakeDeposit(address indexed memberAddress, uint256 indexed tribute, uint256 indexed shares);
     event MakePayment(address indexed sender, address indexed paymentToken, uint256 indexed payment);
     event AmendGovernance(address indexed newToken, address indexed minion, uint256 depositRate);
-    event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[6] flags, uint256 proposalId, address indexed delegateKey, address indexed memberAddress);
-    event ProposalIndex(uint256 proposalIndex);
+    event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[7] flags, uint256 proposalId, address indexed delegateKey, address indexed memberAddress);
+    event SponsorProposal(address sponsor, address memberAddress, uint256 proposalId, uint256 proposalIndex, uint256 startingPeriod);
     event SubmitVote(uint256 proposalId, uint256 indexed proposalIndex, address indexed delegateKey, address indexed memberAddress, uint8 uintVote);
     event ProcessProposal(uint256 indexed proposalIndex, bool didPass);
     event ProcessGuildKickProposal(uint256 indexed proposalIndex, uint256 indexed proposalId, bool didPass);
@@ -114,7 +114,7 @@ contract Party is ReentrancyGuard {
         uint256 startingPeriod; // the period in which voting can start for this proposal
         uint256 yesVotes; // the total number of YES votes for this proposal
         uint256 noVotes; // the total number of NO votes for this proposal
-        bool[6] flags; // [processed, didPass, cancelled, guildkick, spending, member]
+        bool[7] flags; // [sponsored, processed, didPass, cancelled, guildkick, spending, member]
         bytes32 details; // proposal details to add context for members 
         uint256 maxTotalSharesAndLootAtYesVote; // the maximum # of total shares encountered at a yes vote on this proposal
         mapping(address => Vote) votesByMember; // the votes on this proposal by each member
@@ -146,6 +146,7 @@ contract Party is ReentrancyGuard {
         address[] memory _founders,
         address[] memory _approvedTokens,
         address _daoFee,
+        address _idleToken,
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
         uint256 _gracePeriodLength,
@@ -185,7 +186,7 @@ contract Party is ReentrancyGuard {
         status = NOT_SET;
         
         _addFounders(_founders); //had to move to internal function to avoid stack to deep issue 
-        _setIdle(approvedTokens[1]);
+        _setIdle(_idleToken);
     }
     
     /****************
@@ -255,6 +256,7 @@ contract Party is ReentrancyGuard {
         
         if(_newToken != address(0)) {
             require(totalGuildBankTokens < MAX_TOKEN_WHITELIST_COUNT, "too many tokens already");
+            require(!tokenWhitelist[address(_newToken)], "already whitelisted");
             approvedTokens.push(_newToken);
             totalGuildBankTokens += 1;
         }
@@ -285,24 +287,24 @@ contract Party is ReentrancyGuard {
         require(applicant != address(0), "applicant cannot be 0");
         require(members[applicant].jailed == false, "applicant jailed");
         require(userTokenBalances[GUILD][depositToken] >= partyGoal, "goal not met yet");
-        require(flagNumber != 0 || flagNumber != 1 || flagNumber != 2, "flag must be 3 - guildkick, 4 - spending, 5 - membership");
+        require(flagNumber != 0 || flagNumber != 1 || flagNumber != 2 || flagNumber != 3, "flag must be 4 - guildkick, 5 - spending, 6 - membership");
 
         // collect tribute from proposer and store it in the Moloch until the proposal is processed
         require(IERC20(paymentToken).transferFrom(msg.sender, address(this), proposalDepositReward), "proposal deposit failed");
         unsafeAddToBalance(ESCROW, paymentToken, proposalDepositReward);
         
         // check whether pool goal is met before allowing spending proposals
-        if(flagNumber == 4) {
+        if(flagNumber == 5) {
             require(userTokenBalances[GUILD][depositToken] >= partyGoal, "goal not met yet");
         }
 
-        bool[6] memory flags; // [processed, didPass, cancelled, guildkick, spending, member]
+        bool[7] memory flags; // [sponsored, processed, didPass, cancelled, guildkick, spending, member]
         flags[flagNumber] = true;
         
-        if(flagNumber == 3) {
-            _submitProposal(applicant, 0, 0, 0, 0, address(0), address(0), details, flags);
+        if(flagNumber == 4) {
+            _submitProposal(applicant, 0, 0, 0, address(0), 0, address(0), details, flags);
         } else {
-            _submitProposal(applicant, tributeOffered, sharesRequested, lootRequested, paymentRequested, tributeToken, paymentToken, details, flags);
+            _submitProposal(applicant, sharesRequested, lootRequested, tributeOffered, tributeToken, paymentRequested,  paymentToken, details, flags);
         }
 
         // NOTE: Should approve the 0x address as a blank token for guildKick proposals where there's no token. 
@@ -310,21 +312,21 @@ contract Party is ReentrancyGuard {
     }
     
 
-    function _submitProposal(
+function _submitProposal(
         address applicant,
         uint256 sharesRequested,
         uint256 lootRequested,
         uint256 tributeOffered,
-        uint256 paymentRequested,
         address tributeToken,
+        uint256 paymentRequested,
         address paymentToken,
         bytes32 details,
-        bool[6] memory flags
+        bool[7] memory flags
     ) internal {
         Proposal memory proposal = Proposal({
             applicant : applicant,
             proposer : msg.sender,
-            sponsor : msg.sender,
+            sponsor : address(0),
             sharesRequested : sharesRequested,
             lootRequested : lootRequested,
             tributeOffered : tributeOffered,
@@ -341,26 +343,44 @@ contract Party is ReentrancyGuard {
 
         proposals[proposalCount] = proposal;
         address memberAddress = memberAddressByDelegateKey[msg.sender];
-        
-        
+        // NOTE: argument order matters, avoid stack too deep
+        emit SubmitProposal(applicant, sharesRequested, lootRequested, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags, proposalCount, msg.sender, memberAddress);
+        proposalCount += 1;
+    }
+
+    
+    function sponsorProposal(uint256 proposalId) public nonReentrant  {
+        Proposal storage proposal = proposals[proposalId];
+        require(members[msg.sender].exists == true, "must be a member to sponsor");
+        require(proposal.proposer != address(0), 'proposal must have been proposed');
+        require(!proposal.flags[0], "proposal has already been sponsored");
+        require(!proposal.flags[3], "proposal has been cancelled");
+
+        // guild kick proposal
+        if (proposal.flags[4]) { //  [sponsored, processed, didPass, cancelled, guildkick, spending, member]
+            require(!proposedToKick[proposal.applicant], 'already proposed to kick');
+            proposedToKick[proposal.applicant] = true;
+        }
+
         // compute startingPeriod for proposal
         uint256 startingPeriod = max(
             getCurrentPeriod(),
             proposalQueue.length == 0 ? 0 : proposals[proposalQueue[proposalQueue.length.sub(1)]].startingPeriod
-        ).add(60);
-    
+        ).add(1);
+
         proposal.startingPeriod = startingPeriod;
-       
-        // NOTE: argument order matters, avoid stack too deep
-        emit SubmitProposal(applicant, sharesRequested, lootRequested, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags, proposalCount, msg.sender, memberAddress);
-        
-        proposalCount += 1;
-        uint256 proposalId = proposalCount; 
+
+        address memberAddress = memberAddressByDelegateKey[msg.sender];
+        proposal.sponsor = memberAddress;
+
+        proposal.flags[0] = true; // sponsored
+
+        // append proposal to the queue
         proposalQueue.push(proposalId);
-        uint256 proposalIndex = proposalQueue.length.sub(1);
         
-        emit ProposalIndex(proposalIndex);
+        emit SponsorProposal(msg.sender, memberAddress, proposalId, proposalQueue.length.sub(1), startingPeriod);
     }
+
 
 
     // NOTE: In PoolParty proposalId = proposalIndex +1 since sponsorship is auto. 
@@ -724,7 +744,7 @@ contract Party is ReentrancyGuard {
         return proposalQueue.length;
     }
 
-    function getProposalFlags(uint256 proposalId) public view returns (bool[6] memory) {
+    function getProposalFlags(uint256 proposalId) public view returns (bool[7] memory) {
         return proposals[proposalId].flags;
     }
 
