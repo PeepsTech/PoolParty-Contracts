@@ -57,15 +57,14 @@ contract Party is ReentrancyGuard {
     event MakeDeposit(address indexed memberAddress, uint256 indexed tribute, uint256 indexed shares);
     event MakePayment(address indexed sender, address indexed paymentToken, uint256 indexed payment);
     event AmendGovernance(address indexed newToken, address indexed minion, uint256 depositRate);
-    event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[7] flags, uint256 proposalId, address indexed delegateKey, address indexed memberAddress);
-    event SponsorProposal(address sponsor, address memberAddress, uint256 proposalId, uint256 proposalIndex, uint256 startingPeriod);
+    event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[7] flags, uint256 proposalId, address indexed memberAddress);
+    event SponsorProposal(address sponsor, uint256 proposalId, uint256 proposalIndex, uint256 startingPeriod);
     event SubmitVote(uint256 proposalId, uint256 indexed proposalIndex, address indexed delegateKey, address indexed memberAddress, uint8 uintVote);
     event ProcessProposal(uint256 indexed proposalIndex, bool didPass);
     event ProcessGuildKickProposal(uint256 indexed proposalIndex, uint256 indexed proposalId, bool didPass);
     event Ragequit(address indexed memberAddress, uint256 sharesToBurn, uint256 lootToBurn);
     event TokensCollected(address indexed token, uint256 amountToCollect);
     event CancelProposal(uint256 indexed proposalId, address applicantAddress);
-    event UpdateDelegateKey(address indexed memberAddress, address newDelegateKey);
     event Withdraw(address indexed memberAddress, address token, uint256 amount);
 
     // *******************
@@ -127,17 +126,9 @@ contract Party is ReentrancyGuard {
 
     mapping(address => Member) public members;
     address[] public memberList;
-    
-    mapping(address => address) public memberAddressByDelegateKey;
 
     mapping(uint256 => Proposal) public proposals;
     uint256[] public proposalQueue;
-
-
-    modifier onlyDelegate {
-        require(members[memberAddressByDelegateKey[msg.sender]].shares > 0, "not delegate");
-        _;
-    }
     
     /******************
     SUMMONING FUNCTIONS
@@ -146,7 +137,6 @@ contract Party is ReentrancyGuard {
         address[] memory _founders,
         address[] memory _approvedTokens,
         address _daoFee,
-        address _idleToken,
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
         uint256 _gracePeriodLength,
@@ -186,7 +176,7 @@ contract Party is ReentrancyGuard {
         status = NOT_SET;
         
         _addFounders(_founders); //had to move to internal function to avoid stack to deep issue 
-        _setIdle(_idleToken);
+        _setIdle(approvedTokens[1]);
     }
     
     /****************
@@ -196,7 +186,6 @@ contract Party is ReentrancyGuard {
     function _addFounders(address[] memory _founders) internal nonReentrant {
             for (uint256 i = 0; i < _founders.length; i++) {
             members[_founders[i]] = Member(_founders[i], 0, 0, 0, 0, 0, false, false);
-            memberAddressByDelegateKey[_founders[i]] = _founders[i];
             memberList.push(_founders[i]);
         }
     }
@@ -342,9 +331,8 @@ function _submitProposal(
         });
 
         proposals[proposalCount] = proposal;
-        address memberAddress = memberAddressByDelegateKey[msg.sender];
         // NOTE: argument order matters, avoid stack too deep
-        emit SubmitProposal(applicant, sharesRequested, lootRequested, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags, proposalCount, msg.sender, memberAddress);
+        emit SubmitProposal(applicant, sharesRequested, lootRequested, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags, proposalCount, msg.sender);
         proposalCount += 1;
     }
 
@@ -369,26 +357,26 @@ function _submitProposal(
         ).add(1);
 
         proposal.startingPeriod = startingPeriod;
-
-        address memberAddress = memberAddressByDelegateKey[msg.sender];
-        proposal.sponsor = memberAddress;
+        
+        proposal.sponsor = msg.sender;
 
         proposal.flags[0] = true; // sponsored
 
         // append proposal to the queue
         proposalQueue.push(proposalId);
         
-        emit SponsorProposal(msg.sender, memberAddress, proposalId, proposalQueue.length.sub(1), startingPeriod);
+        emit SponsorProposal(msg.sender, proposalId, proposalQueue.length.sub(1), startingPeriod);
     }
 
 
 
     // NOTE: In PoolParty proposalId = proposalIndex +1 since sponsorship is auto. 
-    function submitVote(uint256 proposalIndex, uint8 uintVote) public nonReentrant onlyDelegate {
-        address memberAddress = memberAddressByDelegateKey[msg.sender];
+    function submitVote(uint256 proposalIndex, uint8 uintVote) public nonReentrant  {
+        address memberAddress = msg.sender;
         Member storage member = members[memberAddress];
 
         require(proposalIndex < proposalQueue.length, "proposal does not exist");
+        require(members[memberAddress].exists == true, "must be a member to vote");
         Proposal storage proposal = proposals[proposalQueue[proposalIndex]];
 
         require(uintVote < 3, "must be less than 3, 0 = yes, 1 = no");
@@ -453,17 +441,9 @@ function _submitProposal(
 
             // the applicant is a new member, create a new record for them
             } else {
-                // if the applicant address is already taken by a member's delegateKey, reset it to their member address
-                if (members[memberAddressByDelegateKey[proposal.applicant]].exists) {
-                    address memberToOverride = memberAddressByDelegateKey[proposal.applicant];
-                    memberAddressByDelegateKey[memberToOverride] = memberToOverride;
-                    members[memberToOverride].delegateKey = memberToOverride;
-                }
-                
 
                 // use applicant address as delegateKey by default
                 members[proposal.applicant] = Member(proposal.applicant, proposal.sharesRequested, proposal.lootRequested, 0, 0, 0, false, true);
-                memberAddressByDelegateKey[proposal.applicant] = proposal.applicant;
                 memberList.push(proposal.applicant);
             }
 
@@ -701,23 +681,6 @@ function _submitProposal(
         emit CancelProposal(proposalId, msg.sender);
     }
 
-    function updateDelegateKey(address newDelegateKey) public nonReentrant {
-        require(members[msg.sender].shares.add(members[msg.sender].loot) > 0, "only members can ragequit");
-        require(newDelegateKey != address(0), "newDelegateKey cannot be 0");
-
-        // skip checks if member is setting the delegate key to their member address
-        if (newDelegateKey != msg.sender) {
-            require(!members[newDelegateKey].exists, "cannot overwrite existing members");
-            require(!members[memberAddressByDelegateKey[newDelegateKey]].exists, "cannot overwrite delegate keys");
-        }
-
-        Member storage member = members[msg.sender];
-        memberAddressByDelegateKey[member.delegateKey] = address(0);
-        memberAddressByDelegateKey[newDelegateKey] = msg.sender;
-        member.delegateKey = newDelegateKey;
-
-        emit UpdateDelegateKey(msg.sender, newDelegateKey);
-    }
 
     // can only ragequit if the latest proposal you voted YES on has been processed
     function canRagequit(uint256 highestIndexYesVote) public view returns (bool) {
