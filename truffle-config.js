@@ -22,7 +22,7 @@
 
 const HDWalletProvider = require('@truffle/hdwallet-provider');
 require('dotenv').config() 
-const mnenomic = "concert load couple harbor equip island argue ramp clarify fence smart topic"; //autogen seed phrase
+const mnenomic = "myth like bonus scare over problem client lizard pioneer submit female collect"; //autogen seed phrase
 module.exports = {
   /**
    * Networks define how you connect to your ethereum client and let you set the
@@ -46,10 +46,9 @@ module.exports = {
     //
      development: {
       host: "127.0.0.1",     // Localhost (default: none)
-      port: 7545,            // Standard Ethereum port (default: none)
-      network_id: "*",       // Any network (default: none)
-      provider: () => new HDWalletProvider(mnenomic, "https://mainnet.infura.io/v3/<infura>"),
-      from: "0x7136fbDdD4DFfa2369A9283B6E90A040318011Ca"
+      port: 8545,            // Standard Ethereum port (default: none)
+      network_id: "999",       // Any network (default: none)
+      provider: () => new HDWalletProvider(mnenomic, "http://localhost:8545"),
      },
 
     // Useful for deploying to a public network.
