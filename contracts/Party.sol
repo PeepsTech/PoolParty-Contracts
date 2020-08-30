@@ -6,17 +6,17 @@ import "./oz/ReentrancyGuard.sol";
 
 interface IIdleToken {
   function token() external returns (address underlying);
+  function govTokens(uint256) external returns (address govToken);
   function userAvgPrices(address) external returns (uint256 avgPrice);
-  function mintIdleToken(uint256 _amount, bool _skipWholeRebalance) external returns (uint256 mintedTokens);
-  function redeemIdleToken(uint256 _amount, bool _skipRebalance, uint256[] calldata _clientProtocolAmounts) external returns (uint256 redeemedTokens);
+  function mintIdleToken(uint256 _amount, bool _skipWholeRebalance, address _referral) external returns (uint256 mintedTokens);
+  function redeemIdleToken(uint256 _amount) external returns (uint256 redeemedTokens);
   function redeemInterestBearingTokens(uint256 _amount) external;
   function rebalance() external returns (bool);
   function rebalanceWithGST() external returns (bool);
-  function openRebalance(uint256[] calldata _newAllocations) external returns (bool, uint256 avgApr);
   function tokenPrice() external view returns (uint256 price);
   function getAPRs() external view returns (address[] memory addresses, uint256[] memory aprs);
   function getAvgAPR() external view returns (uint256 avgApr);
-  function getCurrentAllocations() external view returns (address[] memory tokenAddresses, uint256[] memory amounts, uint256 total);
+  function getGovTokensAmounts(address _usr) external view returns (uint256[] memory _amounts);
 }
 
 
@@ -28,11 +28,11 @@ contract Party is ReentrancyGuard {
     /****************
     GOVERNANCE PARAMS
     ****************/
-    uint256 public periodDuration; // default = 17280 = 4.8 hours in seconds (5 periods per day)
-    uint256 public votingPeriodLength; // default = 35 periods (7 days)
-    uint256 public gracePeriodLength; // default = 35 periods (7 days)
-    uint256 public proposalDepositReward; // default = 10 ETH (~$1,000 worth of ETH at contract deployment)
-    uint256 public depositRate; // rate to convert into shares during summoning time (default = 10000000000000000000 wei amt. // 100 wETH => 10 shares)
+    uint256 public periodDuration; // default = 300 (5 min)
+    uint256 public votingPeriodLength; // default = 864 periods (3 days)
+    uint256 public gracePeriodLength; // default = 864 periods (3 days)
+    uint256 public proposalDepositReward; // default = 2.5 DAI / USDC
+    uint256 public depositRate; // rate to convert into shares during summoning time (default = 1000000000000000000 wei amt. // 100 wETH => 100 shares)
     uint256 public summoningTime; // needed to determine the current period
     uint256 public partyGoal; // savings goal for DAO 
 
@@ -77,6 +77,7 @@ contract Party is ReentrancyGuard {
     uint256 public totalShares; // total shares across all members
     uint256 public totalLoot; // total loot across all members
     uint256 public totalGuildBankTokens; // total tokens with non-zero balance in guild bank
+    uint256 public feePercent = uint256(5).div(100);
 
     address public constant GUILD = address(0xdead);
     address public constant ESCROW = address(0xbeef);
@@ -204,7 +205,7 @@ contract Party is ReentrancyGuard {
         require(totalShares + shares <= MAX_INPUT, "shares maxed");
         
         if(memberList.length > 1) {
-        require((members[msg.sender].shares.add(shares)) != (totalShares.add(shares)).div(uint256(2)), "can't buy 50%+ shares without a proposal");
+        require((members[msg.sender].shares.add(shares)) < (totalShares.add(shares)).div(uint256(2)), "can't buy 50%+ shares without a proposal");
         }
         
         members[msg.sender].shares += shares;
@@ -275,7 +276,6 @@ contract Party is ReentrancyGuard {
         require(tokenWhitelist[paymentToken], "payment not whitelisted");
         require(applicant != address(0), "applicant cannot be 0");
         require(members[applicant].jailed == false, "applicant jailed");
-        require(userTokenBalances[GUILD][depositToken] >= partyGoal, "goal not met yet");
         require(flagNumber != 0 || flagNumber != 1 || flagNumber != 2 || flagNumber != 3, "flag must be 4 - guildkick, 5 - spending, 6 - membership");
 
         // collect tribute from proposer and store it in the Moloch until the proposal is processed
@@ -287,7 +287,7 @@ contract Party is ReentrancyGuard {
             require(userTokenBalances[GUILD][depositToken] >= partyGoal, "goal not met yet");
         }
 
-        bool[7] memory flags; // [sponsored, processed, didPass, cancelled, guildkick, spending, member]
+        bool[7] memory flags; // [sponsored, processed, didPass, cancelled, guildkick, spending, member, agent]
         flags[flagNumber] = true;
         
         if(flagNumber == 4) {
@@ -300,7 +300,6 @@ contract Party is ReentrancyGuard {
         return proposalCount - 1; // return proposalId - contracts calling submit might want it
     }
     
-
 function _submitProposal(
         address applicant,
         uint256 sharesRequested,
@@ -339,7 +338,7 @@ function _submitProposal(
     
     function sponsorProposal(uint256 proposalId) public nonReentrant  {
         Proposal storage proposal = proposals[proposalId];
-        require(members[msg.sender].exists == true, "must be a member to sponsor");
+        require(members[msg.sender].exists == true && members[msg.sender].jailed == false, "must be a member to sponsor");
         require(proposal.proposer != address(0), 'proposal must have been proposed');
         require(!proposal.flags[0], "proposal has already been sponsored");
         require(!proposal.flags[3], "proposal has been cancelled");
@@ -376,7 +375,7 @@ function _submitProposal(
         Member storage member = members[memberAddress];
 
         require(proposalIndex < proposalQueue.length, "proposal does not exist");
-        require(members[memberAddress].exists == true, "must be a member to vote");
+        require(member.exists == true && member.jailed == false, "must be a member to vote");
         Proposal storage proposal = proposals[proposalQueue[proposalIndex]];
 
         require(uintVote < 3, "must be less than 3, 0 = yes, 1 = no");
@@ -414,9 +413,11 @@ function _submitProposal(
 
         Proposal storage proposal = proposals[proposalQueue[proposalIndex]];
 
-        require(!proposal.flags[3], "not standard proposal"); 
+        require(!proposal.flags[4], "not standard proposal");
+        
+        //[sponsored, processed, didPass, cancelled, guildkick, spending, member, agent]
 
-        proposal.flags[0] = true; // processed
+        proposal.flags[1] = true; // processed
 
         bool didPass = _didPass(proposalIndex);
 
@@ -432,7 +433,7 @@ function _submitProposal(
 
         // PROPOSAL PASSED
         if (didPass) {
-            proposal.flags[1] = true; // didPass
+            proposal.flags[2] = true; // didPass
 
             // if the applicant is already a member, add to their existing shares & loot
             if (members[proposal.applicant].exists) {
@@ -442,7 +443,6 @@ function _submitProposal(
             // the applicant is a new member, create a new record for them
             } else {
 
-                // use applicant address as delegateKey by default
                 members[proposal.applicant] = Member(proposal.applicant, proposal.sharesRequested, proposal.lootRequested, 0, 0, 0, false, true);
                 memberList.push(proposal.applicant);
             }
@@ -459,6 +459,30 @@ function _submitProposal(
             unsafeInternalTransfer(ESCROW, GUILD, proposal.tributeToken, proposal.tributeOffered);
             if (proposal.tributeToken == depositToken) {
                 depositToIdle(proposal.applicant, proposal.tributeToken, proposal.tributeOffered);
+            }
+            
+            if (proposal.paymentToken == depositToken) {
+                
+                uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
+                uint256 tokensRequested = proposal.paymentRequested.div(iTokenPrice);
+                
+                uint256 earnings = getUserEarnings(tokensRequested);
+                uint256 withdrawFee = earnings.mul(feePercent);
+                
+                unsafeInternalTransfer(GUILD, daoFee, address(idleToken), withdrawFee);
+                 
+                uint256 tokensToRedeem = tokensRequested.sub(withdrawFee.div(iTokenPrice)); 
+                uint256 redeemedTokens = idleToken.redeemIdleToken(tokensToRedeem);
+                unsafeInternalTransfer(GUILD, proposal.applicant, proposal.paymentToken, redeemedTokens);
+            }
+            
+            if (proposal.paymentToken == address(idleToken)) {
+                uint256 earnings = getUserEarnings(proposal.paymentRequested);
+                uint256 withdrawFee = earnings.mul(feePercent);
+                unsafeInternalTransfer(GUILD, daoFee, address(idleToken), withdrawFee);
+                
+                uint256 tokensToRedeem = proposal.paymentRequested.sub(withdrawFee);
+                unsafeInternalTransfer(GUILD, proposal.applicant, proposal.paymentToken, tokensToRedeem);
             }
             
             unsafeInternalTransfer(GUILD, proposal.applicant, proposal.paymentToken, proposal.paymentRequested);
@@ -575,10 +599,15 @@ function _submitProposal(
                 userTokenBalances[GUILD][approvedTokens[i]] -= amountToRagequit;
                 userTokenBalances[memberAddress][approvedTokens[i]] += amountToRagequit;
                 
+                uint256 uBal = userTokenBalances[memberAddress][address(idleToken)].sub(member.iTokenRedemptions);
+                uint256 withdrawFee = uBal.mul(feePercent);
+                unsafeInternalTransfer(memberAddress, daoFee, address(idleToken), withdrawFee); 
+                
+                
                 if(member.iTokenRedemptions > 0) {
                     uint256 iTokenAdj = member.iTokenRedemptions;
                     unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), iTokenAdj); 
-                    member.iTokenRedemptions.add(amountToRagequit.sub(iTokenAdj));  
+                    member.iTokenRedemptions.add(amountToRagequit.sub(iTokenAdj.add(withdrawFee))); 
                 }
             }
         }
@@ -600,21 +629,30 @@ function _submitProposal(
         _withdrawBalance(token, amount);
     }
     
-    function withdrawInterest(address memberAddress) public nonReentrant {
-        require(members[memberAddress].exists == true, "not member");
+    function withdrawEarnings(address memberAddress, uint256 amount) external nonReentrant {
+        
+        Member storage member = members[memberAddress];
+        
+        require(member.exists == true, "not member");
         require(address(msg.sender) == memberAddress, "can only be called by member");
         
-        uint256 earnings = getUserEarnings(msg.sender);
-        uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
-        uint256 earningsTokens = earnings.div(iTokenPrice);
         
-        require(earningsTokens > 0, "not enough earnings to redeem a token");
-        members[memberAddress].iTokenRedemptions.add(earningsTokens);
-    
-        uint256 redeemedTokens = idleToken.redeemIdleToken(earningsTokens, false, new uint256[](0));
+        uint256 earnings = getUserEarnings(member.iTokenAmts.sub(member.iTokenRedemptions));
+        
+        require(earnings >= amount, "not enough earnings to redeem this many tokens");
+        
+        uint256 withdrawFee = earnings.mul(feePercent);
+        unsafeInternalTransfer(memberAddress, daoFee, address(idleToken), withdrawFee);
+        
+        uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
+        uint256 earningsToUser = earnings.sub(withdrawFee);
+        uint256 earningsTokens = earningsToUser.div(iTokenPrice);
+        
+        uint256 redeemedTokens = idleToken.redeemIdleToken(earningsTokens);
+        member.iTokenRedemptions.add(earnings);
         // @DEV - see if we need to run a collectTokens function to collect the DAI and move to GUILD
         unsafeAddToBalance(GUILD, depositToken, redeemedTokens);
-        unsafeInternalTransfer(GUILD, msg.sender, depositToken, redeemedTokens);
+        unsafeInternalTransfer(GUILD, memberAddress, depositToken, redeemedTokens);
         _withdrawBalance(depositToken, redeemedTokens);
     }
 
@@ -639,18 +677,6 @@ function _submitProposal(
         emit Withdraw(msg.sender, token, amount);
     }
     
-    function withdrawFees() external {
-        
-        uint256 totalEarnings = getGuildEarnings();
-        // Pool Fees = 20% of interest (i.e. if interest earnings = 5% then pool fees are 1%)
-        uint256 poolFees = totalEarnings.mul(uint256(100).div(20));
-        uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
-        uint256 feeTokens = poolFees.div(iTokenPrice);
-        
-        require(feeTokens > 1*10**18, "not enough fees to withdraw");
-        require(IERC20(address(idleToken)).transfer(daoFee, feeTokens));
-        unsafeSubtractFromBalance(GUILD, address(idleToken), feeTokens);
-    }
 
     // NOTE: gives the DAO the ability to collect payments and also recover tokens just sent to DAO address (if whitelisted)
     function collectTokens(address token) external {
@@ -729,26 +755,13 @@ function _submitProposal(
     HELPER FUNCTIONS
     ***************/
     
-    function getUserEarnings(address memberAddress) public returns (uint256) {
-        uint256 userBalance = members[memberAddress].iTokenAmts.sub(members[memberAddress].iTokenRedemptions);
+    function getUserEarnings(uint256 amount) public returns (uint256) {
+        uint256 userBalance = amount;
         uint256 avgCost = userBalance.mul(IIdleToken(idleToken).userAvgPrices(address(this))).div(10**18);
         uint256 currentValue = userBalance.mul(IIdleToken(idleToken).tokenPrice()).div(10**18);
-        uint256 totalEarnings = currentValue.sub(avgCost);
-        uint256 poolFees = totalEarnings.mul(uint256(100).div(20));
-        uint256 earnings = totalEarnings.sub(poolFees);
+        uint256 earnings = currentValue.sub(avgCost);
 
         return earnings;
-    }
-    
-    // *NOTE* - returns earnings inclusive of fees 
-    function getGuildEarnings() public returns (uint256) {
-        address user = address(this);
-        uint256 userBalance = getUserTokenBalance(GUILD, address(idleToken));
-        uint256 avgCost = userBalance.mul(idleToken.userAvgPrices(user)).div(10**18);
-        uint256 currentValue = userBalance.mul(idleToken.tokenPrice()).div(10**18);
-        uint256 totalEarnings = currentValue.sub(avgCost);
-        
-        return totalEarnings;
     }
     
     function depositToIdle(address depositor, address token, uint256 amount) internal {
@@ -756,7 +769,7 @@ function _submitProposal(
         require(amount != 0, "no tokens to deposit");
         require(IERC20(address(idleToken)).approve(address(this), amount), 'approval failed');
         
-        uint256 newIdle = IIdleToken(idleToken).mintIdleToken(amount, true);
+        uint256 newIdle = IIdleToken(idleToken).mintIdleToken(amount, true, depositor);
         unsafeAddToBalance(GUILD, address(idleToken), newIdle);
         members[depositor].iTokenAmts.add(newIdle);
     }
