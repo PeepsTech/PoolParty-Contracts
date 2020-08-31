@@ -149,7 +149,7 @@ contract Party is ReentrancyGuard {
         uint256 _partyGoal,
         bytes32 _name,
         bytes32 _desc
-    ) public {
+    ) external {
         require(!initialized, "initialized");
         require(_periodDuration > 0, "_periodDuration zeroed");
         require(_votingPeriodLength > 0, "_votingPeriodLength zeroed");
@@ -190,7 +190,7 @@ contract Party is ReentrancyGuard {
     SUMMONING FUNCTIONS
     ****************/
     
-    function _addFounders(address[] calldata _founders) internal nonReentrant {
+    function _addFounders(address[] memory _founders) internal nonReentrant {
             for (uint256 i = 0; i < _founders.length; i++) {
             members[_founders[i]] = Member(_founders[i], 0, 0, 0, 0, 0, false, true);
             memberList.push(_founders[i]);
@@ -652,7 +652,7 @@ contract Party is ReentrancyGuard {
     }
     
 
-    function withdrawBalances(address[] calldata tokens, uint256[] calldata amounts, bool max) public nonReentrant {
+    function withdrawBalances(address[] calldata tokens, uint256[] calldata amounts, bool max) external nonReentrant {
         require(tokens.length == amounts.length, "tokens + amounts arrays must match");
 
         for (uint256 i=0; i < tokens.length; i++) {
