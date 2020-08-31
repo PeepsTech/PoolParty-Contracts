@@ -23,7 +23,7 @@ interface IIdleToken {
 contract Party is ReentrancyGuard {
     using SafeMath for uint256;
     
-    IIdleToken public idleToken;
+    
     
     /****************
     GOVERNANCE PARAMS
@@ -35,6 +35,7 @@ contract Party is ReentrancyGuard {
     uint256 public depositRate; // rate to convert into shares during summoning time (default = 10000000000000000000 wei amt. // 100 wETH => 10 shares)
     uint256 public summoningTime; // needed to determine the current period
     uint256 public partyGoal; // savings goal for DAO 
+    address public constant idleToken = 0xB517bB2c2A5D690de2A866534714eaaB13832389;
 
     address public daoFee; // address where fees are sent
     address public depositToken; // deposit token contract reference; default = periodDuration
@@ -137,8 +138,8 @@ contract Party is ReentrancyGuard {
     SUMMONING FUNCTIONS
     ******************/
     function init(
-        address[] memory _founders,
-        address[] memory _approvedTokens,
+        address[] calldata _founders,
+        address[] calldata _approvedTokens,
         address _daoFee,
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
@@ -181,7 +182,7 @@ contract Party is ReentrancyGuard {
         status = NOT_SET;
         
         _addFounders(_founders); //had to move to internal function to avoid stack to deep issue 
-        _setIdle(approvedTokens[1]);
+        //_setIdle(approvedTokens[1]);
         _initReentrancyGuard();
     }
     
@@ -189,16 +190,16 @@ contract Party is ReentrancyGuard {
     SUMMONING FUNCTIONS
     ****************/
     
-    function _addFounders(address[] memory _founders) internal nonReentrant {
+    function _addFounders(address[] calldata _founders) internal nonReentrant {
             for (uint256 i = 0; i < _founders.length; i++) {
             members[_founders[i]] = Member(_founders[i], 0, 0, 0, 0, 0, false, true);
             memberList.push(_founders[i]);
         }
     }
     
-    function _setIdle(address _idleToken) internal nonReentrant {
-        idleToken = IIdleToken(_idleToken);
-    }
+    // function _setIdle(address _idleToken) internal nonReentrant {
+    //     idleToken = IIdleToken(_idleToken);
+    // }
     
     
     function makeDeposit(address token, uint256 tribute) public nonReentrant {
@@ -238,7 +239,7 @@ contract Party is ReentrancyGuard {
     
     function amendGovernance(
         address _newToken,
-        address _idleToken,
+       // address _idleToken,
         address _minion,
         uint256 _partyGoal,
         uint256 _depositRate
@@ -255,9 +256,9 @@ contract Party is ReentrancyGuard {
             totalGuildBankTokens += 1;
         }
         
-        if(_idleToken != address(0)) {
-            _setIdle(_idleToken);
-        }
+        // if(_idleToken != address(0)) {
+        //     _setIdle(_idleToken);
+        // }
         
         emit AmendGovernance(_newToken, minion, depositRate);
     }
@@ -482,7 +483,7 @@ contract Party is ReentrancyGuard {
                 uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
                 uint256 idleToConvert = proposal.paymentRequested.div(iTokenPrice);
                 uint256 idleRedemptionAmt = subFees(GUILD, idleToConvert);
-                uint256 depositTokenAmt = idleToken.redeemIdleToken(idleRedemptionAmt);
+                uint256 depositTokenAmt = IIdleToken(idleToken).redeemIdleToken(idleRedemptionAmt);
                 unsafeInternalTransfer(GUILD, proposal.applicant, proposal.paymentToken, depositTokenAmt);
             }
             
@@ -638,7 +639,7 @@ contract Party is ReentrancyGuard {
         uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
         uint256 earningsTokens = earningsToUser.div(iTokenPrice);
         
-        uint256 redeemedTokens = idleToken.redeemIdleToken(earningsTokens);
+        uint256 redeemedTokens = IIdleToken(idleToken).redeemIdleToken(earningsTokens);
         member.iTokenRedemptions.add(redeemedTokens);
         // @DEV - see if we need to run a collectTokens function to collect the DAI and move to GUILD
         unsafeAddToBalance(GUILD, depositToken, redeemedTokens);
@@ -651,7 +652,7 @@ contract Party is ReentrancyGuard {
     }
     
 
-    function withdrawBalances(address[] memory tokens, uint256[] memory amounts, bool max) public nonReentrant {
+    function withdrawBalances(address[] calldata tokens, uint256[] calldata amounts, bool max) public nonReentrant {
         require(tokens.length == amounts.length, "tokens + amounts arrays must match");
 
         for (uint256 i=0; i < tokens.length; i++) {

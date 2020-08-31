@@ -5,9 +5,9 @@ import "./CloneFactory.sol";
 
 contract PartyStarter is CloneFactory {
     
-    address payable public template;
+    address public template;
     
-    constructor (address payable _template) public {
+    constructor (address _template) public {
         template = _template;
     }
 
@@ -15,8 +15,8 @@ contract PartyStarter is CloneFactory {
     event PartyStarted(address indexed pty, address[] indexed _founders, address[] indexed _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDeposit, uint256 summoningTime);
 
     function startParty(
-        address[] memory _founders,
-        address[] memory _approvedTokens, //deposit token in 0, idleToken in 1
+        address[] calldata _founders,
+        address[] calldata _approvedTokens, //deposit token in 0, idleToken in 1
         address _daoFees,
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
@@ -26,7 +26,7 @@ contract PartyStarter is CloneFactory {
         uint256 _partyGoal,
         bytes32 _name,
         bytes32 _desc
-    ) public returns (address) {
+    ) external returns (address) {
        Party pty = Party(createClone(template));
        
        pty.init(
