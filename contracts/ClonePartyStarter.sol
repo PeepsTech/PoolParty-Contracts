@@ -1,6 +1,6 @@
 pragma solidity 0.5.17;
 
-import "./PoolPartyClone.sol";
+import "./CloneParty.sol";
 import "./CloneFactory.sol";
 
 contract PartyStarter is CloneFactory {
@@ -24,8 +24,7 @@ contract PartyStarter is CloneFactory {
         uint256 _proposalDeposit,
         uint256 _depositRate,
         uint256 _partyGoal,
-        bytes32 _name,
-        bytes32 _desc
+        bytes32 _name
     ) external returns (address) {
        Party pty = Party(createClone(template));
        
@@ -39,8 +38,7 @@ contract PartyStarter is CloneFactory {
             _proposalDeposit,
             _depositRate,
             _partyGoal,
-            _name,
-            _desc);
+            _name);
         
         emit PartyStarted(address(pty), _founders, _approvedTokens, _daoFees, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDeposit, now);
         return address(pty);

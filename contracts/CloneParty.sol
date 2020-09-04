@@ -41,7 +41,6 @@ contract Party is ReentrancyGuard {
     address public depositToken; // deposit token contract reference; default = periodDuration
     address public minion; // contract that allows execution of arbitrary calls voted on by members // gov. param adjustments
     bytes32 public name; 
-    bytes32 public desc;
     bool private initialized;
 
 
@@ -147,8 +146,7 @@ contract Party is ReentrancyGuard {
         uint256 _proposalDepositReward,
         uint256 _depositRate,
         uint256 _partyGoal,
-        bytes32 _name,
-        bytes32 _desc
+        bytes32 _name
     ) external {
         require(!initialized, "initialized");
         require(_periodDuration > 0, "_periodDuration zeroed");
@@ -178,7 +176,6 @@ contract Party is ReentrancyGuard {
         summoningTime = now;
         initialized = true;
         name = _name;
-        desc = _desc;
         status = NOT_SET;
         
         _addFounders(_founders); //had to move to internal function to avoid stack to deep issue 

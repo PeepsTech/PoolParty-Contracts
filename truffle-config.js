@@ -48,7 +48,7 @@ module.exports = {
       host: "127.0.0.1",     // Localhost (default: none)
       port: 8545,            // Standard Ethereum port (default: none)
       network_id: "999",       // Any network (default: none)
-      provider: () => new HDWalletProvider(mnenomic, "http://localhost:8545"),
+      //provider: () => new HDWalletProvider(mnenomic, "http://localhost:8545"),
      },
 
     // Useful for deploying to a public network.

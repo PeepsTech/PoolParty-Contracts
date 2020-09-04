@@ -15,7 +15,7 @@ bytes32 _name,
 bytes32 _desc
 */
 
-const _founders = ["0xe0B7afD7d271f570499011eb4A5b682F46CCA5A9","0x7E8345d6BA37a98b5f7B196547A3C40F3126575B"];
+const _founders = ["0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1","0xFFcf8FDEE72ac11b5c542428B35EEF5769C409f0"];
 const _approvedTokens = ["0x6B175474E89094C44Da98b954EedeAC495271d0F","0x78751b12da02728f467a44eac40f5cbc16bd7934"]; // DAI and IdleDAI
 const _daoFees ="0x7136fbDdD4DFfa2369A9283B6E90A040318011Ca";
 const _periodDuration = 60; //seconds
