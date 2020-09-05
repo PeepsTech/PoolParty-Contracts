@@ -261,7 +261,7 @@ contract Party is ReentrancyGuard {
         require(flagNumber != 0 || flagNumber != 1 || flagNumber != 2 || flagNumber != 3, "flag must be 4 - guildkick, 5 - spending, 6 - membership");
         
         // collect deposit from proposer
-        require(IERC20(paymentToken).transferFrom(msg.sender, address(this), proposalDepositReward), "proposal deposit failed");
+        require(IERC20(depositToken).transferFrom(msg.sender, address(this), proposalDepositReward), "proposal deposit failed");
         unsafeAddToBalance(ESCROW, paymentToken, proposalDepositReward);
         // collect tribute from proposer and store it in the Moloch until the proposal is processed
         require(IERC20(tributeToken).transferFrom(msg.sender, address(this), tributeOffered), "tribute token transfer failed");
@@ -465,7 +465,7 @@ contract Party is ReentrancyGuard {
                 }
                 
                 uint256 depositTokenAmt = IIdleToken(idleToken).redeemIdleToken(idleRedemptionAmt);
-                unsafeInternalTransfer(GUILD, proposal.applicant, proposal.paymentToken, depositTokenAmt);
+                unsafeAddToBalance(proposal.applicant, proposal.paymentToken, depositTokenAmt);
              }
             
             unsafeInternalTransfer(GUILD, proposal.applicant, proposal.paymentToken, proposal.paymentRequested);
