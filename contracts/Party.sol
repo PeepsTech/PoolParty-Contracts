@@ -1,7 +1,7 @@
 pragma solidity 0.5.17;
 
 // ["0x4F96Fe3b7A6Cf9725f59d353F723c1bDb64CA6Aa","0x295CA5bC5153698162dDbcE5dF50E436a58BA21e"] kDAI, kIdleDAI
-// ["0xDE2C7c260C851c0AF3db31409D0585bbE9D20a78","0x7136fbDdD4DFfa2369A9283B6E90A040318011Ca"] test members
+// ["0xDE2C7c260C851c0AF3db31409D0585bbE9D20a78","0x7136fbDdD4DFfa2369A9283B6E90A040318011Ca","0x3792acDf2A8658FBaDe0ea70C47b89cB7777A5a5"] test members
 // 1000000000000000000
 // 0x5465737450617274790a00000000000000000000000000000000000000000000
 
@@ -9,6 +9,16 @@ import "./oz/SafeMath.sol";
 import "./oz/IERC20.sol";
 import "./oz/ReentrancyGuard.sol";
 
+    /*=====================
+    WELCOME TO THE POOL Party v1
+    
+    **USE AT YOUR OWN RISK**
+    Forked from an early version of the permissioned Mystic v2x by LexDAO 
+    Special thanks to LexDAO and Ross Campbell for pushing the boundaries of Moloch mysticism 
+    
+    Developed by Peeps Democracy
+    MIT License - But please use for good (ie. don't be a dick). 
+    =======================*/
 
 interface IIdleToken {
   function token() external returns (address underlying);
@@ -28,8 +38,7 @@ interface IIdleToken {
 
 contract Party is ReentrancyGuard {
     using SafeMath for uint256;
-    
-    //IIdleToken public idleToken;
+
     
     /****************
     GOVERNANCE PARAMS
@@ -63,7 +72,7 @@ contract Party is ReentrancyGuard {
     // ***************
     event SummonComplete(address[] indexed summoners, address[] tokens, uint256 summoningTime, uint256 periodDuration, uint256 votingPeriodLength, uint256 gracePeriodLength, uint256 proposalDepositReward, uint256 partyGoal, uint256 depositRate);
     event MakeDeposit(address indexed memberAddress, uint256 indexed tribute, uint256 indexed shares);
-    event AmendGovernance(address indexed newToken, address indexed minion, uint256 depositRate);
+    event AmendGovernance(address indexed newToken, address indexed newIdle, uint256 depositRate, uint256 partyGoal);
     event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[8] flags, uint256 proposalId, address indexed delegateKey, address indexed memberAddress);
     event SponsorProposal(address indexed sponsor, address indexed memberAddress, uint256 proposalId, uint256 proposalIndex, uint256 startingPeriod);
     event SubmitVote(uint256 proposalId, uint256 indexed proposalIndex, address indexed delegateKey, address indexed memberAddress, uint8 uintVote);
@@ -74,6 +83,7 @@ contract Party is ReentrancyGuard {
     event TokensCollected(address indexed token, uint256 amountToCollect);
     event CancelProposal(uint256 indexed proposalId, address applicantAddress);
     event UpdateDelegateKey(address indexed memberAddress, address newDelegateKey);
+    event WithdrawEarnings(address indexed memberAddress, uint256 earningsToUser, uint256 redeemedTokens);
     event Withdraw(address indexed memberAddress, address token, uint256 amount);
 
     // *******************
@@ -207,26 +217,17 @@ contract Party is ReentrancyGuard {
     
     
     /****************
-    MINION GOVERNANCE
+    GOVERNANCE
     ****************/
-    
-    // NOTE: should be done programmatically so that it's the minion created w/ the contract
-    function setMinion(address _minion) public nonReentrant {
-        require(address(minion) == address(0), "already set");
-        require(members[msg.sender].exists == true, "must be a member to set minion");
-        minion = _minion;
-    }
+
     
     function amendGovernance(
         address _newToken,
         address _idleToken,
-        address _minion,
         uint256 _partyGoal,
         uint256 _depositRate
-    ) external nonReentrant {
-        require(msg.sender == address(minion), "only minion can make these changes!");
-        
-        minion = _minion;
+    ) public nonReentrant {
+        require(msg.sender == address(this));
         depositRate = _depositRate;
         partyGoal = _partyGoal;
         
@@ -239,7 +240,7 @@ contract Party is ReentrancyGuard {
             _setIdle(_idleToken);
         }
         
-        emit AmendGovernance(_newToken, minion, depositRate);
+        emit AmendGovernance(_newToken, address(_idleToken), depositRate, partyGoal);
     }
 
     /*****************
@@ -254,8 +255,7 @@ contract Party is ReentrancyGuard {
         uint256 flagNumber,
         address tributeToken,
         address paymentToken,
-        bytes32 details,
-        bytes memory data
+        bytes32 details
     ) public nonReentrant returns (uint256 proposalId) {
         require(sharesRequested.add(lootRequested) <= MAX_INPUT, "shares maxed");
         require(tokenWhitelist[tributeToken] && tokenWhitelist[paymentToken], "tokens not whitelisted");
@@ -286,14 +286,27 @@ contract Party is ReentrancyGuard {
             _submitProposal(applicant, 0, 0, 0, address(0), 0, address(0), details, "", flags );
         } 
         
-        if(flagNumber == 7){
-            _submitProposal(applicant, 0, 0, tributeOffered, address(0), paymentRequested, paymentToken, details, data, flags);
-        }
-        
         _submitProposal(applicant, sharesRequested, lootRequested, tributeOffered, tributeToken, paymentRequested, paymentToken, details, "", flags);
 
         // NOTE: Should approve the 0x address as a blank token for guildKick proposals where there's no token. 
         return proposalCount - 1; // return proposalId - contracts calling submit might want it
+    }
+    
+    function submitActionProposal( // stages arbitrary function calls - based on Raid Guild 'Minion'
+        address actionTo,
+        address actionToken,
+        uint256 actionTokenAmount,
+        uint256 actionValue,
+        bytes32 details,
+        bytes calldata data
+    ) external returns (uint256 proposalId) {
+        
+        bool[8] memory flags; // [sponsored, processed, didPass, cancelled, guildkick, spending, member, action]
+        flags[7] = true; // guild action
+        
+        _submitProposal(actionTo, 0, 0, actionValue, address(0), actionTokenAmount, actionToken, details, data, flags);
+        
+        return proposalCount - 1;
     }
     
 
@@ -630,11 +643,11 @@ contract Party is ReentrancyGuard {
                 userTokenBalances[memberAddress][approvedTokens[i]] += amountToRagequit;
                 uint256 idleForFee = userTokenBalances[memberAddress][address(idleToken)].sub(member.iTokenRedemptions);
                 uint256 remainingIdle = subFees(memberAddress, idleForFee);
+                member.iTokenRedemptions.add(idleForFee);  
                 
                 if(member.iTokenRedemptions > 0) {
                     uint256 iTokenAdj = remainingIdle.sub(member.iTokenRedemptions);
-                    unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), iTokenAdj); 
-                    member.iTokenRedemptions.add(amountToRagequit.sub(iTokenAdj));  
+                    unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), iTokenAdj);
                 }
             }
         }
@@ -670,6 +683,8 @@ contract Party is ReentrancyGuard {
         // @DEV - see if we need to run a collectTokens function to collect the DAI and move to GUILD
         unsafeAddToBalance(GUILD, depositToken, redeemedTokens);
         unsafeInternalTransfer(GUILD, memberAddress, depositToken, redeemedTokens);
+        
+        emit WithdrawEarnings(msg.sender, earningsToUser, redeemedTokens);
     }
 
     function withdrawBalance(address token, uint256 amount) public nonReentrant {
@@ -726,7 +741,10 @@ contract Party is ReentrancyGuard {
 
     // can only ragequit if the latest proposal you voted YES on has been processed
     function canRagequit(uint256 highestIndexYesVote) public view returns (bool) {
-        require(highestIndexYesVote < proposalQueue.length, "no such proposal");
+        if(proposalQueue.length > 0){
+            require(highestIndexYesVote < proposalQueue.length, "no such proposal");
+        }
+        
         return proposals[proposalQueue[highestIndexYesVote]].flags[0];
     }
 
@@ -771,7 +789,7 @@ contract Party is ReentrancyGuard {
     HELPER FUNCTIONS
     ***************/
     
-    function getUserEarnings(uint256 amount) internal returns (uint256) {
+    function getUserEarnings(uint256 amount) public returns (uint256) {
         uint256 userBalance = amount;
         uint256 avgCost = userBalance.mul(IIdleToken(idleToken).userAvgPrices(address(this))).div(10**18);
         uint256 currentValue = userBalance.mul(IIdleToken(idleToken).tokenPrice()).div(10**18);
