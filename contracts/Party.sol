@@ -14,7 +14,7 @@ import "./oz/ReentrancyGuard.sol";
     
     **USE AT YOUR OWN RISK**
     Forked from an early version of the permissioned Mystic v2x by LexDAO 
-    Special thanks to LexDAO and Ross Campbell for pushing the boundaries of Moloch mysticism 
+    Special thanks to LexDAO for pushing the boundaries of Moloch mysticism 
     
     Developed by Peeps Democracy
     MIT License - But please use for good (ie. don't be a dick). 
@@ -642,13 +642,14 @@ contract Party is ReentrancyGuard {
                 userTokenBalances[GUILD][approvedTokens[i]] -= amountToRagequit;
                 userTokenBalances[memberAddress][approvedTokens[i]] += amountToRagequit;
                 uint256 idleForFee = userTokenBalances[memberAddress][address(idleToken)].sub(member.iTokenRedemptions);
-                uint256 remainingIdle = subFees(memberAddress, idleForFee);
-                member.iTokenRedemptions.add(idleForFee);  
-                
-                if(member.iTokenRedemptions > 0) {
-                    uint256 iTokenAdj = remainingIdle.sub(member.iTokenRedemptions);
-                    unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), iTokenAdj);
-                }
+                subFees(memberAddress, idleForFee);
+ 
+                 if(member.iTokenRedemptions > 0) {
+                     uint256 idleAdj = member.iTokenRedemptions;
+                     unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), idleAdj);
+                 }
+                 
+                member.iTokenRedemptions.add(idleForFee); 
             }
         }
 
@@ -741,11 +742,12 @@ contract Party is ReentrancyGuard {
 
     // can only ragequit if the latest proposal you voted YES on has been processed
     function canRagequit(uint256 highestIndexYesVote) public view returns (bool) {
-        if(proposalQueue.length > 0){
+        if(proposalQueue.length == 0){
+            return true;
+        } else {
             require(highestIndexYesVote < proposalQueue.length, "no such proposal");
+            return proposals[proposalQueue[highestIndexYesVote]].flags[0];
         }
-        
-        return proposals[proposalQueue[highestIndexYesVote]].flags[0];
     }
 
     function hasVotingPeriodExpired(uint256 startingPeriod) public view returns (bool) {
@@ -817,6 +819,7 @@ contract Party is ReentrancyGuard {
         
         uint256 shares = amount.div(depositRate);
         members[msg.sender].shares += shares;
+        require(members[msg.sender].shares <= partyGoal.div(depositRate).div(2), "can't take over 50% of the shares w/o a proposal");
         totalShares += shares;
         
         require(IERC20(depositToken).transferFrom(msg.sender, address(this), amount), "token transfer failed");
