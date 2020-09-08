@@ -6,7 +6,7 @@ contract PartyStarter {
     Party private party;
 
     
-    event PartyStarted(address indexed party, address[] indexed _founders, address[] indexed _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDepositReward, uint256 summoningTime);
+    event PartyStarted(address indexed party, address[] _founders, address[] _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDepositReward, uint256 summoningTime);
 
     function startParty(
         address[] memory _founders,
