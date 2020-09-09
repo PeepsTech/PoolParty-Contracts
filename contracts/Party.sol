@@ -1,10 +1,5 @@
 pragma solidity 0.5.17;
 
-// ["0x4F96Fe3b7A6Cf9725f59d353F723c1bDb64CA6Aa","0x295CA5bC5153698162dDbcE5dF50E436a58BA21e"] kDAI, kIdleDAI
-// ["0xDE2C7c260C851c0AF3db31409D0585bbE9D20a78","0x7136fbDdD4DFfa2369A9283B6E90A040318011Ca","0x3792acDf2A8658FBaDe0ea70C47b89cB7777A5a5"] test members
-// 1000000000000000000
-// 0x5465737450617274790a00000000000000000000000000000000000000000000
-
 import "./oz/SafeMath.sol";
 import "./oz/IERC20.sol";
 import "./oz/ReentrancyGuard.sol";
@@ -70,7 +65,7 @@ contract Party is ReentrancyGuard {
     // EVENTS
     // ***************
     event SummonComplete(address[] indexed summoners, address[] tokens, uint256 summoningTime, uint256 periodDuration, uint256 votingPeriodLength, uint256 gracePeriodLength, uint256 proposalDepositReward, uint256 partyGoal, uint256 depositRate);
-    event MakeDeposit(address indexed memberAddress, uint256 indexed tribute, uint256 indexed shares);
+    event MakeDeposit(address indexed memberAddress, uint256 indexed tribute, uint256 indexed shares, uint256 idleAvgCost, uint8 goalHit);
     event AmendGovernance(address indexed newToken, address indexed newIdle, uint256 depositRate, uint256 partyGoal);
     event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[7] flags, uint256 proposalId, address indexed delegateKey, address indexed memberAddress);
     event SponsorProposal(address indexed sponsor, address indexed memberAddress, uint256 proposalId, uint256 proposalIndex, uint256 startingPeriod);
@@ -780,7 +775,7 @@ contract Party is ReentrancyGuard {
         
         idleAvgCost = IIdleToken(idleToken).userAvgPrices(address(this));
         
-        emit MakeDeposit(depositor, mintedTokens, shares);
+        emit MakeDeposit(depositor, mintedTokens, shares, idleAvgCost, goalHit);
     }
     
     
