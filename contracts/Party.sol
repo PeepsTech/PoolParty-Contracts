@@ -5,9 +5,9 @@ pragma solidity 0.5.17;
 // 1000000000000000000
 // 0x5465737450617274790a00000000000000000000000000000000000000000000
 
-import "./oz/SafeMath.sol";
-import "./oz/IERC20.sol";
-import "./oz/ReentrancyGuard.sol";
+import "./SafeMath.sol";
+import "./IERC20.sol";
+import "./ReentrancyGuard.sol";
 
     /*=====================
     WELCOME TO THE POOL Party v1
@@ -260,12 +260,16 @@ contract Party is ReentrancyGuard {
         if(flagNumber == 4) {
             _submitProposal(applicant, 0, 0, 0, address(0), 0, address(0), details, flags);
         } 
-        else if(flagNumber == 7) { // for amend governance use tributeOffered for partyGoal, paymentRequested for depositRate, tributeToken for new Token, paymentToken for new idleToken
+        
+        else if (flagNumber == 7) { // for amend governance use tributeOffered for partyGoal, paymentRequested for depositRate, tributeToken for new Token, paymentToken for new idleToken
             _submitProposal(applicant, 0, 0, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags);
-        } else {
-            _submitProposal(applicant, sharesRequested, lootRequested, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags);
         } 
         
+        else {
+        
+        _submitProposal(applicant, sharesRequested, lootRequested, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags);
+
+        }
         // NOTE: Should approve the 0x address as a blank token for guildKick proposals where there's no token. 
         return proposalCount - 1; // return proposalId - contracts calling submit might want it
     }
@@ -635,13 +639,9 @@ contract Party is ReentrancyGuard {
         require(member.exists == true, "not member");
         require(address(msg.sender) == memberAddress, "can only be called by member");
         
-        /* @Dev think this might need to be changed to 
+        
         uint256 earnings = getUserEarnings(member.iTokenAmts);
         require(earnings.sub(member.iTokenRedemptions) >= amount, "not enough earnings to redeem this many tokens");
-        */
-
-        uint256 earnings = getUserEarnings(member.iTokenAmts.sub(member.iTokenRedemptions));
-        require(earnings >= amount, "not enough earnings to redeem this many tokens");
         
         uint256 earningsToUser = subFees(GUILD, amount);
         uint256 redeemedTokens = IIdleToken(idleToken).redeemIdleToken(earningsToUser);
