@@ -173,6 +173,7 @@ contract Party is ReentrancyGuard {
         require(_approvedTokens.length > 0, "need token");
         
         depositToken = _approvedTokens[0];
+        idleToken = _approvedTokens[1];
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
         emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
@@ -181,6 +182,10 @@ contract Party is ReentrancyGuard {
             require(!tokenWhitelist[_approvedTokens[i]], "token duplicated");
             tokenWhitelist[_approvedTokens[i]] = true;
             approvedTokens.push(_approvedTokens[i]);
+        }
+        
+        for (uint256 i = 0; i < _founders.length; i++) {
+            _addFounder(_founders[i]);
         }
         
         daoFee = _daoFee;
@@ -195,19 +200,15 @@ contract Party is ReentrancyGuard {
         desc = _desc;
         goalHit = 0;
         
-        _addFounders(_founders); //had to move to internal function to avoid stack to deep issue 
-        _setIdle(approvedTokens[1]);
     }
     
     /****************
     SUMMONING FUNCTIONS
     ****************/
     
-    function _addFounders(address[] memory _founders) internal {
-            for (uint256 i = 0; i < _founders.length; i++) {
-            members[_founders[i]] = Member(0, 0, 0, 0, 0, false, true);
-            memberList.push(_founders[i]);
-        }
+   function _addFounder(address founder) internal {
+            members[founder] = Member(0, 0, 0, 0, 0, false, true);
+            memberList.push(founder);
     }
     
     // Can also be used to upgrade the idle contract, but not switch to new DeFi token (ie. iDAI to iUSDC)
