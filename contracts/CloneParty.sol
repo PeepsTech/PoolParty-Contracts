@@ -210,9 +210,9 @@ contract Party is ReentrancyGuard {
     }
     
     // Can also be used to upgrade the idle contract, but not switch to new DeFi token (ie. iDAI to iUSDC)
-    // function _setIdle(address _idleToken) internal {
-    //     idleToken = _idleToken;
-    // }
+     function _setIdle(address _idleToken) internal {
+         idleToken = _idleToken;
+     }
     
 
     /*****************
