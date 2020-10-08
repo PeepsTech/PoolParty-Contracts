@@ -7,7 +7,7 @@ pragma solidity 0.5.17;
 
 import "./SafeMath.sol";
 import "./IERC20.sol";
-import "./ReentrancyGuard.sol";
+import "./NewReentrancy.sol";
 
     /*=====================
     WELCOME TO THE POOL Party v1
@@ -54,8 +54,8 @@ contract Party is ReentrancyGuard {
     address public daoFee; // address where fees are sent
     address public depositToken; // deposit token contract reference; default = periodDuration
     address public idleToken; 
-    bytes32 public name; 
-    bytes32 public desc;
+    bool private initialized;
+
     //address public constant idleToken = 0xB517bB2c2A5D690de2A866534714eaaB13832389;
 
 
@@ -162,10 +162,10 @@ contract Party is ReentrancyGuard {
         uint256 _gracePeriodLength,
         uint256 _proposalDepositReward,
         uint256 _depositRate,
-        uint256 _partyGoal,
-        bytes32 _name,
-        bytes32 _desc
+        uint256 _partyGoal
     ) public {
+        require(!initialized, "initialized");
+        initialized = true;
         require(_periodDuration > 0, "_periodDuration zeroed");
         require(_votingPeriodLength > 0, "_votingPeriodLength zeroed");
         require(_votingPeriodLength <= MAX_INPUT, "_votingPeriodLength maxed");
@@ -173,7 +173,7 @@ contract Party is ReentrancyGuard {
         require(_approvedTokens.length > 0, "need token");
         
         depositToken = _approvedTokens[0];
-        idleToken = _approvedTokens[1];
+        //idleToken = _approvedTokens[1];
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
         emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
@@ -196,9 +196,10 @@ contract Party is ReentrancyGuard {
         depositRate = _depositRate;
         partyGoal = _partyGoal;
         summoningTime = now;
-        name = _name;
-        desc = _desc;
         goalHit = 0;
+        
+        _initReentrancyGuard();
+
         
     }
     
@@ -430,10 +431,11 @@ contract Party is ReentrancyGuard {
             totalShares = totalShares.add(proposal.sharesRequested);
             totalLoot = totalLoot.add(proposal.lootRequested);
 
-            unsafeInternalTransfer(ESCROW, GUILD, proposal.tributeToken, proposal.tributeOffered);
              if (proposal.tributeToken == depositToken && proposal.tributeOffered > 0) {
                  unsafeSubtractFromBalance(ESCROW, proposal.tributeToken, proposal.tributeOffered);
                  depositToIdle(proposal.applicant, proposal.tributeOffered, proposal.sharesRequested);
+             } else {
+               unsafeInternalTransfer(ESCROW, GUILD, proposal.tributeToken, proposal.tributeOffered);
              }
             
              if (proposal.paymentToken == address(idleToken)) {
@@ -773,7 +775,7 @@ contract Party is ReentrancyGuard {
         return members[user].iTokenAmts.sub(members[user].iTokenRedemptions);
     }
     
-    function getIdleValue(uint256 amount) external view returns (uint256){
+    function getIdleValue(uint256 amount) public view returns (uint256){
         return amount.mul(IIdleToken(idleToken).tokenPrice()).div(10**18);
     }
     
@@ -806,15 +808,24 @@ contract Party is ReentrancyGuard {
         members[depositor].iTokenAmts += mintedTokens;
         unsafeAddToBalance(GUILD, idleToken, mintedTokens);
         
-        if(totalDeposits > partyGoal){
+        // Checks to see if goal has been reached with this deposit
+         goalHit = checkGoal();
+        
+        // @Dev updates here b/c solidity doesn't recognize as a view only function
+        idleAvgCost = IIdleToken(idleToken).userAvgPrices(address(this));
+        
+        emit MakeDeposit(depositor, amount, mintedTokens, shares, idleAvgCost, goalHit);
+    }
+    
+    function checkGoal() public returns (uint8) {
+        uint256 daoFunds = getUserTokenBalance(GUILD, idleToken);
+        uint256 idleValue = getIdleValue(daoFunds);
+        
+        if(idleValue >= partyGoal){
             goalHit = 1;
         } else {
             goalHit = 0;
         }
-        
-        idleAvgCost = IIdleToken(idleToken).userAvgPrices(address(this));
-        
-        emit MakeDeposit(depositor, amount, mintedTokens, shares, idleAvgCost, goalHit);
     }
     
     
