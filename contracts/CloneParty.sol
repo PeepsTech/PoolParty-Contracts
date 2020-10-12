@@ -103,8 +103,8 @@ contract Party is ReentrancyGuard {
     struct Member {
         uint256 shares; // the # of voting shares assigned to this member
         uint256 loot; // the loot amount available to this member (combined with shares on ragequit)
-        uint256 iTD; // iTokens Deposited
-        uint256 iTW; // iTokens Withdrawn
+        uint256 iTB; // iToken Balance
+        uint256 iTW; // iToken withdrawals
         uint256 highestIndexYesVote; // highest proposal index # on which the member voted YES
         bool jailed; // set to proposalIndex of a passing guild kick proposal for this member, prevents voting on and sponsoring proposals
         bool exists; // always true once a member has been created
@@ -568,46 +568,57 @@ contract Party is ReentrancyGuard {
         unsafeInternalTransfer(ESCROW, msg.sender, depositToken, proposalDepositReward);
     }
 
-    function ragequit(uint256 sharesToBurn, uint256 lootToBurn) public nonReentrant {
+    function ragequit() public nonReentrant {
+        /* 
+        @Dev - to simplify accounting had to set ragequit to an all or nothing proposition.
+        Since members who ragequit can always redeposit after the ragequit, it should not 
+        be to limiting until a better system can be implemented in ModMol v3. 
+        */
+        
         require(members[msg.sender].shares.add(members[msg.sender].loot) > 0, "only users with balances can ragequit");
-        _ragequit(msg.sender, sharesToBurn, lootToBurn);
+        _ragequit(msg.sender);
     }
 
-    function _ragequit(address memberAddress, uint256 sharesToBurn, uint256 lootToBurn) internal returns (uint256) {
+    function _ragequit(address memberAddress) internal returns (uint256) {
         uint256 initialTotalSharesAndLoot = totalShares.add(totalLoot);
 
         Member storage member = members[memberAddress];
 
-        require(member.shares >= sharesToBurn, "insufficient shares");
-        require(member.loot >= lootToBurn, "insufficient loot");
-
         require(canRagequit(member.highestIndexYesVote), "cannot ragequit until highest index proposal member voted YES on is processed");
 
+        // set member shares and loot to 
+        uint256 sharesToBurn = member.shares;
+        uint256 lootToBurn = member.loot;
         uint256 sharesAndLootToBurn = sharesToBurn.add(lootToBurn);
 
-        // burn shares and loot
+        // burn shares and loot (obviously sets member shares and loot back to 0)
         member.shares = member.shares.sub(sharesToBurn);
         member.loot = member.loot.sub(lootToBurn);
         totalShares = totalShares.sub(sharesToBurn);
         totalLoot = totalLoot.sub(lootToBurn);
-        
 
         for (uint256 i = 0; i < approvedTokens.length; i++) {
             uint256 amountToRagequit = fairShare(userTokenBalances[GUILD][approvedTokens[i]], sharesAndLootToBurn, initialTotalSharesAndLoot);
             if (amountToRagequit > 0) { // gas optimization to allow a higher maximum token limit
                 userTokenBalances[GUILD][approvedTokens[i]] -= amountToRagequit;
                 userTokenBalances[memberAddress][approvedTokens[i]] += amountToRagequit;
-                uint256 usrIdle = userTokenBalances[memberAddress][address(idleToken)].sub(member.iTW);
-                uint256 feeEligible = getUserEarnings(usrIdle);
+                uint256 feeEligible = getUserEarnings(member.iTB);
                 subFees(memberAddress, feeEligible);
-                member.iTW += usrIdle;
                
-                // Guild bank adjustment for redeemed iTokens
+                /* 
+                    @Dev - Only runs guild bank adjustment if member has withdrawn tokens.
+                    Otherwise, adjustment would end up costing member their fair share
+                    of Guild earnings. 
+                
+                */
                  if(member.iTW > 0) {
-                     uint256 idleAdj = member.iTW;
+                     uint256 idleAdj = (amountToRagequit.sub(member.iTB))*(sharesAndLootToBurn.div(initialTotalSharesAndLoot));
                      unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), idleAdj);
                  }
-                 return usrIdle; 
+                 
+                // Reset member iToken Balance and iToken Withdrawals for internal accting 
+                member.iTB = 0;
+                member.iTW = 0;
             }
         }
         emit Ragequit(msg.sender, sharesToBurn, lootToBurn, member.iTW);  
@@ -620,7 +631,7 @@ contract Party is ReentrancyGuard {
         require(member.loot > 0, "member must have loot"); // note - should be impossible for jailed member to have shares
         require(canRagequit(member.highestIndexYesVote), "cannot ragequit until highest index proposal member voted YES on is processed");
 
-        _ragequit(memberToKick, 0, member.loot);
+        _ragequit(memberToKick);
     }
     
     function withdrawEarnings(address memberAddress, uint256 amount) external nonReentrant {
@@ -631,14 +642,15 @@ contract Party is ReentrancyGuard {
         require(address(msg.sender) == memberAddress, "can only be called by member");
         
         
-        uint256 earnings = getUserEarnings(member.iTD);
-        require(earnings.sub(member.iTW) >= amount, "not enough earnings to redeem this many tokens");
+        uint256 earnings = getUserEarnings(member.iTB);
+        require(earnings >= amount, "not enough earnings to redeem this many tokens");
         
         uint256 earningsToUser = subFees(GUILD, amount);
         uint256 redeemedTokens = IIdleToken(idleToken).redeemIdleToken(earningsToUser);
         
         // Accounting updates
         member.iTW += earningsToUser;
+        member.iTB -= earningsToUser;
         unsafeSubtractFromBalance(GUILD, address(idleToken), earningsToUser);
         unsafeAddToBalance(memberAddress, depositToken, redeemedTokens);
         
@@ -760,9 +772,6 @@ contract Party is ReentrancyGuard {
         return earnings;
     }
     
-    function getUserIdleBalance(address user) external view returns (uint256){
-        return members[user].iTD.sub(members[user].iTW);
-    }
     
     function getIdleValue(uint256 amount) public view returns (uint256){
         return amount.mul(IIdleToken(idleToken).tokenPrice()).div(10**18);
@@ -794,7 +803,7 @@ contract Party is ReentrancyGuard {
         // Token is the deposit token (eg. DAI)
         require(IERC20(depositToken).approve(address(idleToken), amount), 'approval failed');
         uint256 mintedTokens = IIdleToken(idleToken).mintIdleToken(amount, true, depositor);
-        members[depositor].iTD += mintedTokens;
+        members[depositor].iTB += mintedTokens;
         unsafeAddToBalance(GUILD, idleToken, mintedTokens);
         
         // Checks to see if goal has been reached with this deposit
