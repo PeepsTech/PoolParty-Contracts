@@ -105,6 +105,7 @@ contract Party is ReentrancyGuard {
         uint256 loot; // the loot amount available to this member (combined with shares on ragequit)
         uint256 iTB; // iToken Balance
         uint256 iTW; // iToken withdrawals
+        uint256 iVal; // base value off which earnings are calculated
         uint256 highestIndexYesVote; // highest proposal index # on which the member voted YES
         bool jailed; // set to proposalIndex of a passing guild kick proposal for this member, prevents voting on and sponsoring proposals
         bool exists; // always true once a member has been created
@@ -195,7 +196,7 @@ contract Party is ReentrancyGuard {
     
     
     function _addFounder(address founder) internal {
-            members[founder] = Member(0, 0, 0, 0, 0, false, true);
+            members[founder] = Member(0, 0, 0, 0, 0, 0, false, true);
             memberList.push(founder);
     }
     
@@ -410,7 +411,7 @@ contract Party is ReentrancyGuard {
             // the applicant is a new member, create a new record for them
             } else {
 
-                members[proposal.applicant] = Member(proposal.sharesRequested, proposal.lootRequested, 0, 0, 0, false, true);
+                members[proposal.applicant] = Member(proposal.sharesRequested, proposal.lootRequested, 0, 0, 0, 0, false, true);
                 memberList.push(proposal.applicant);
             }
 
@@ -643,7 +644,7 @@ contract Party is ReentrancyGuard {
         
         
         uint256 earnings = getUserEarnings(member.iTB);
-        require(earnings >= amount, "not enough earnings to redeem this many tokens");
+        require(earnings.sub(member.iVal) >= amount, "not enough earnings to redeem this many tokens");
         
         uint256 earningsToUser = subFees(GUILD, amount);
         uint256 redeemedTokens = IIdleToken(idleToken).redeemIdleToken(earningsToUser);
@@ -804,6 +805,7 @@ contract Party is ReentrancyGuard {
         require(IERC20(depositToken).approve(address(idleToken), amount), 'approval failed');
         uint256 mintedTokens = IIdleToken(idleToken).mintIdleToken(amount, true, depositor);
         members[depositor].iTB += mintedTokens;
+        members[depositor].iVal += amount;
         unsafeAddToBalance(GUILD, idleToken, mintedTokens);
         
         // Checks to see if goal has been reached with this deposit
