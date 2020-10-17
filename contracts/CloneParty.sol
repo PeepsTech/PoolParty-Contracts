@@ -11,6 +11,7 @@ import "./NewReentrancy.sol";
     
     Developed by Peeps Democracy
     MIT License - But please use for good (ie. don't be a dick). 
+    Definitely NO WARRANTIES.
     =======================*/
 
 interface IIdleToken {
@@ -70,11 +71,11 @@ contract Party is ReentrancyGuard {
     event ProcessProposal(uint256 indexed proposalIndex, uint256 indexed proposalId, bool didPass);
     event ProcessIdleProposal(uint256 indexed proposalIndex, uint256 indexed proposalId, uint256 idleRedemptionAmt, uint256 depositTokenAmt);
     event ProcessGuildKickProposal(uint256 indexed proposalIndex, uint256 indexed proposalId, bool didPass);
-    event Ragequit(address indexed memberAddress, uint256 sharesToBurn, uint256 lootToBurn, uint256 iTokenRedemptions);
+    event Ragequit(address indexed memberAddress, uint256 sharesToBurn, uint256 lootToBurn);
     event TokensCollected(address indexed token, uint256 amountToCollect);
     event CancelProposal(uint256 indexed proposalId, address applicantAddress);
     event UpdateDelegateKey(address indexed memberAddress, address newDelegateKey);
-    event WithdrawEarnings(address indexed memberAddress, uint256 earningsToUser, uint256 redeemedTokens);
+    event WithdrawEarnings(address indexed memberAddress, address iToken, uint256 earningsToUser, address depositToken, uint256 redeemedTokens);
     event Withdraw(address indexed memberAddress, address token, uint256 amount);
 
     // *******************
@@ -606,23 +607,24 @@ contract Party is ReentrancyGuard {
                 uint256 feeEligible = getUserEarnings(member.iTB);
                 subFees(memberAddress, feeEligible);
                
-                /* 
-                    @Dev - Only runs guild bank adjustment if member has withdrawn tokens.
-                    Otherwise, adjustment would end up costing member their fair share
-                    of Guild earnings. 
-                
-                */
+                // Only runs guild bank adjustment if member has withdrawn tokens.
+                // Otherwise, adjustment would end up costing member their fair share
+                    
                  if(member.iTW > 0) {
-                     uint256 idleAdj = (amountToRagequit.sub(member.iTB))*(sharesAndLootToBurn.div(initialTotalSharesAndLoot));
-                     unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), idleAdj);
+                    // @Dev - SafeMath wasn't working here. 
+                     uint256 iAdj = amountToRagequit - member.iTB;
+                     if(iAdj > 0) {
+                        unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), iAdj);
+                     }
                  }
                  
-                // Reset member iToken Balance and iToken Withdrawals for internal accting 
+                // Reset member-specific internal accting 
                 member.iTB = 0;
                 member.iTW = 0;
+                member.iVal = 0;
             }
         }
-        emit Ragequit(msg.sender, sharesToBurn, lootToBurn, member.iTW);  
+        emit Ragequit(msg.sender, sharesToBurn, lootToBurn);  
     }
 
     function ragekick(address memberToKick) public nonReentrant {
@@ -642,9 +644,9 @@ contract Party is ReentrancyGuard {
         require(member.exists == true, "not member");
         require(address(msg.sender) == memberAddress, "can only be called by member");
         
-        
-        uint256 earnings = getUserEarnings(member.iTB);
-        require(earnings.sub(member.iVal) >= amount, "not enough earnings to redeem this many tokens");
+
+        uint256 iTBVal = getIdleValue(member.iTB);
+        require(iTBVal.sub(member.iVal) >= amount, "not enough earnings to redeem this many tokens");
         
         uint256 earningsToUser = subFees(GUILD, amount);
         uint256 redeemedTokens = IIdleToken(idleToken).redeemIdleToken(earningsToUser);
@@ -653,12 +655,10 @@ contract Party is ReentrancyGuard {
         member.iTW += earningsToUser;
         member.iTB -= earningsToUser;
         unsafeSubtractFromBalance(GUILD, address(idleToken), earningsToUser);
-        unsafeAddToBalance(memberAddress, depositToken, redeemedTokens);
+        unsafeAddToBalance(GUILD, depositToken, redeemedTokens);
+        unsafeInternalTransfer(GUILD, memberAddress, depositToken, redeemedTokens);
         
-        // Auto withdraws rather than relies on additional pull pattern b/c of clear intention of user to withdraw. 
-        _withdrawBalance(depositToken, redeemedTokens);
-        
-        emit WithdrawEarnings(msg.sender, earningsToUser, redeemedTokens);
+        emit WithdrawEarnings(msg.sender, address(idleToken), earningsToUser, depositToken, redeemedTokens);
     }
 
     function withdrawBalance(address token, uint256 amount) public nonReentrant {
@@ -804,6 +804,8 @@ contract Party is ReentrancyGuard {
         // Token is the deposit token (eg. DAI)
         require(IERC20(depositToken).approve(address(idleToken), amount), 'approval failed');
         uint256 mintedTokens = IIdleToken(idleToken).mintIdleToken(amount, true, depositor);
+        
+        // Update internal accounting
         members[depositor].iTB += mintedTokens;
         members[depositor].iVal += amount;
         unsafeAddToBalance(GUILD, idleToken, mintedTokens);
