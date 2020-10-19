@@ -2,6 +2,11 @@ import "./SafeMath.sol";
 import "./IERC20.sol";
 import "./NewReentrancy.sol";
 
+//mainnet template: 0xaeb648EA4244Ed60Ab751F57db4775CCC1288601
+//mainnet factory: 0x2076Fc77E591af47db6a138638d91D9DA2aA1B9D
+//clone factory: 0x8e9A71d7c6D080A065e78b03526D43c2378A0f9C
+
+
     /*=====================
     WELCOME TO THE POOL Party v1
     
@@ -252,8 +257,8 @@ contract Party is ReentrancyGuard {
             _submitProposal(applicant, 0, 0, 0, address(0), 0, address(0), details, flags);
         } 
         
-        else if (flagNumber == 7) { // for amend governance use tributeOffered for partyGoal, paymentRequested for depositRate, tributeToken for new Token, paymentToken for new idleToken
-            _submitProposal(applicant, 0, 0, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags);
+        else if (flagNumber == 7) { // for amend governance use sharesRequested for partyGoal, tributeRequested for depositRate, tributeToken for new Token, paymentToken for new idleToken
+            _submitProposal(applicant, sharesRequested, lootRequested, 0, tributeToken, 0, paymentToken, details, flags);
         } 
         
         else {
@@ -508,13 +513,13 @@ contract Party is ReentrancyGuard {
                 proposal.flags[2] = true; // didPass
             
             // Updates PartyGoal
-            if(proposal.tributeOffered > 0){
-                partyGoal = proposal.tributeOffered;
+            if(proposal.sharesRequested > 0){
+                partyGoal = proposal.sharesRequested;
             }
             
             // Update depositRate
-            if(proposal.paymentRequested > 0){
-                depositRate = proposal.paymentRequested;
+            if(proposal.lootRequested > 0){
+                depositRate = proposal.lootRequested;
             }
             
             // Adds token to whitelist and approvedTokens
@@ -533,7 +538,7 @@ contract Party is ReentrancyGuard {
 
         _returnDeposit();
         
-        emit ProcessAmendGovernance(proposalIndex, proposalId, didPass, proposal.tributeToken, proposal.paymentToken, proposal.tributeOffered, proposal.paymentRequested);
+        emit ProcessAmendGovernance(proposalIndex, proposalId, didPass, proposal.tributeToken, proposal.paymentToken, proposal.sharesRequested, proposal.lootRequested);
     }
     
 
