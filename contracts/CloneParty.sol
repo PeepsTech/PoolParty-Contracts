@@ -2,11 +2,6 @@ import "./SafeMath.sol";
 import "./IERC20.sol";
 import "./NewReentrancy.sol";
 
-//mainnet template: 0xaeb648EA4244Ed60Ab751F57db4775CCC1288601
-//mainnet factory: 0x2076Fc77E591af47db6a138638d91D9DA2aA1B9D
-//clone factory: 0x8e9A71d7c6D080A065e78b03526D43c2378A0f9C
-
-
     /*=====================
     WELCOME TO THE POOL Party v1
     
