@@ -518,16 +518,17 @@ contract Party is ReentrancyGuard {
             }
             
             // Adds token to whitelist and approvedTokens
-            if(proposal.tributeToken != address(0)){
+            if(proposal.tributeToken != depositToken) {
+                require(!tokenWhitelist[proposal.tributeToken], "cannot already have whitelisted the token");
                 require(approvedTokens.length < MAX_TOKEN_WHITELIST_COUNT, "too many tokens already");
                 approvedTokens.push(proposal.tributeToken);
                 tokenWhitelist[address(proposal.tributeToken)] = true;
             }
             // Used to upgrade iToken, cannot be used to switch iToken since depositToken is static
-            if(proposal.paymentToken != address(0)){
+            if(proposal.paymentToken != address(idleToken) && proposal.paymentToken != depositToken) {
                 _setIdle(proposal.paymentToken);
                 approvedTokens.push(proposal.paymentToken);
-                tokenWhitelist[address(proposal.tributeToken)] = true;
+                tokenWhitelist[address(proposal.paymentToken)] = true;
             }
         }
 
