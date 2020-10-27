@@ -383,8 +383,8 @@ contract Party is ReentrancyGuard {
         uint256 proposalId = proposalQueue[proposalIndex];
         Proposal storage proposal = proposals[proposalId];
         
-        //[sponsored -0 , processed -1, didPass -2, cancelled -3, guildkick -4, spending -5, member -6, action -7]
-        require(!proposal.flags[4], "not standard proposal"); 
+        //[sponsored -0 , processed -1, didPass -2, cancelled -3, guildkick -4, spending -5, member -6, governance -7]
+        require(!proposal.flags[4] && !proposal.flags[7], "not standard proposal"); 
 
         proposal.flags[1] = true; // processed
 
