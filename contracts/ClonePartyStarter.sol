@@ -17,7 +17,7 @@ contract PartyStarter is CloneFactory {
     }
 
     
-    event PartyStarted(address indexed pty, address[] _founders, address[] _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDepositReward, uint256 _depositRate, uint256 _partyGoal, uint256 summoningTime);
+    event PartyStarted(address indexed pty, address[] _founders, address[] _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDepositReward, uint256 _depositRate, uint256 _partyGoal, uint256 summoningTime, uint256 _dilutionBound);
 
     function startParty(
         address[] memory _founders,
@@ -28,10 +28,11 @@ contract PartyStarter is CloneFactory {
         uint256 _gracePeriodLength,
         uint256 _proposalDepositReward,
         uint256 _depositRate,
-        uint256 _partyGoal
+        uint256 _partyGoal,
+        uint256 _dilutionBound
     ) public returns (address) {
        Party pty = Party(createClone(template));
-       
+      
        pty.init(
             _founders,
             _approvedTokens,
@@ -41,9 +42,10 @@ contract PartyStarter is CloneFactory {
             _gracePeriodLength,
             _proposalDepositReward,
             _depositRate,
-            _partyGoal);
+            _partyGoal,
+            _dilutionBound);
         
-        emit PartyStarted(address(pty), _founders, _approvedTokens, _daoFees, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal, now);
+        emit PartyStarted(address(pty), _founders, _approvedTokens, _daoFees, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal, now, _dilutionBound);
         return address(pty);
     }
 }
