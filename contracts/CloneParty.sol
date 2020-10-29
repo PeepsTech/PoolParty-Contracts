@@ -1,3 +1,5 @@
+pragma solidity ^0.5.17;
+
 import "./SafeMath.sol";
 import "./IERC20.sol";
 import "./NewReentrancy.sol";
@@ -65,7 +67,7 @@ contract Party is ReentrancyGuard {
     // EVENTS
     // ***************
     event SummonComplete(address[] indexed summoners, address[] tokens, uint256 summoningTime, uint256 periodDuration, uint256 votingPeriodLength, uint256 gracePeriodLength, uint256 proposalDepositReward, uint256 partyGoal, uint256 depositRate);
-    event MakeDeposit(address indexed memberAddress, uint256 tribute, uint256 mintedTokens, uint256 indexed shares, uint256 idleAvgCost, uint8 goalHit);
+    event MakeDeposit(address indexed memberAddress, uint256 tribute, uint256 mintedTokens, uint256 indexed shares, uint8 goalHit);
     event ProcessAmendGovernance(uint256 indexed proposalIndex, uint256 indexed proposalId, bool didPass, address newToken, address newIdle, uint256 newPartyGoal, uint256 newDepositRate);    
     event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[8] flags, uint256 proposalId, address indexed delegateKey, address indexed memberAddress);
     event SponsorProposal(address indexed sponsor, address indexed memberAddress, uint256 proposalId, uint256 proposalIndex, uint256 startingPeriod);
@@ -821,7 +823,7 @@ contract Party is ReentrancyGuard {
         // @Dev updates here b/c solidity doesn't recognize as a view only function
         idleAvgCost = IIdleToken(idleToken).userAvgPrices(address(this));
         
-        emit MakeDeposit(depositor, amount, mintedTokens, shares, idleAvgCost, goalHit);
+        emit MakeDeposit(depositor, amount, mintedTokens, shares, goalHit);
     }
     
     function checkGoal() public returns (uint8) {
@@ -829,9 +831,9 @@ contract Party is ReentrancyGuard {
         uint256 idleValue = getIdleValue(daoFunds);
         
         if(idleValue >= partyGoal){
-            goalHit = 1;
+            return goalHit = 1;
         } else {
-            goalHit = 0;
+            return goalHit = 0;
         }
     }
     
