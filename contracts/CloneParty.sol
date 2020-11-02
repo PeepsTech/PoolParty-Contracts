@@ -1,11 +1,8 @@
+pragma solidity ^0.5.17;
+
 import "./SafeMath.sol";
 import "./IERC20.sol";
 import "./NewReentrancy.sol";
-
-//mainnet template: 0xaeb648EA4244Ed60Ab751F57db4775CCC1288601
-//mainnet factory: 0x2076Fc77E591af47db6a138638d91D9DA2aA1B9D
-//clone factory: 0x8e9A71d7c6D080A065e78b03526D43c2378A0f9C
-
 
     /*=====================
     WELCOME TO THE POOL Party v1
@@ -49,10 +46,12 @@ contract Party is ReentrancyGuard {
     uint256 public depositRate; // rate to convert into shares during summoning time (default = 10000000000000000000 wei amt. // 100 wETH => 10 shares)
     uint256 public summoningTime; // needed to determine the current period
     uint256 public partyGoal; // savings goal for DAO 
+    uint256 public dilutionBound;
 
     address public daoFee; // address where fees are sent
     address public depositToken; // deposit token contract reference; default = periodDuration
-    address public idleToken; 
+    address public idleToken;
+    
     bool public initialized;
     //address public constant idleToken = 0xB517bB2c2A5D690de2A866534714eaaB13832389;
 
@@ -60,7 +59,7 @@ contract Party is ReentrancyGuard {
     // HARD-CODED LIMITS
     // These numbers are quite arbitrary; they are small enough to avoid overflows when doing calculations
     // with periods or shares, yet big enough to not limit reasonable use cases.
-    uint256 constant dilutionBound = 5; // default = 5
+     // default = 5
     uint256 constant MAX_INPUT = 10**36; // maximum bound for reasonable limits
     uint256 constant MAX_TOKEN_WHITELIST_COUNT = 100; // maximum number of whitelisted tokens
 
@@ -68,7 +67,7 @@ contract Party is ReentrancyGuard {
     // EVENTS
     // ***************
     event SummonComplete(address[] indexed summoners, address[] tokens, uint256 summoningTime, uint256 periodDuration, uint256 votingPeriodLength, uint256 gracePeriodLength, uint256 proposalDepositReward, uint256 partyGoal, uint256 depositRate);
-    event MakeDeposit(address indexed memberAddress, uint256 tribute, uint256 mintedTokens, uint256 indexed shares, uint256 idleAvgCost, uint8 goalHit);
+    event MakeDeposit(address indexed memberAddress, uint256 tribute, uint256 mintedTokens, uint256 indexed shares, uint8 goalHit);
     event ProcessAmendGovernance(uint256 indexed proposalIndex, uint256 indexed proposalId, bool didPass, address newToken, address newIdle, uint256 newPartyGoal, uint256 newDepositRate);    
     event SubmitProposal(address indexed applicant, uint256 sharesRequested, uint256 lootRequested, uint256 tributeOffered, address tributeToken, uint256 paymentRequested, address paymentToken, bytes32 details, bool[8] flags, uint256 proposalId, address indexed delegateKey, address indexed memberAddress);
     event SponsorProposal(address indexed sponsor, address indexed memberAddress, uint256 proposalId, uint256 proposalIndex, uint256 startingPeriod);
@@ -161,7 +160,8 @@ contract Party is ReentrancyGuard {
         uint256 _gracePeriodLength,
         uint256 _proposalDepositReward,
         uint256 _depositRate,
-        uint256 _partyGoal
+        uint256 _partyGoal,
+        uint256 _dilutionBound
     ) external {
         require(!initialized, "initialized");
         initialized = true;
@@ -176,7 +176,6 @@ contract Party is ReentrancyGuard {
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
         emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
-
         for (uint256 i = 0; i < _approvedTokens.length; i++) {
             require(!tokenWhitelist[_approvedTokens[i]], "token duplicated");
             tokenWhitelist[_approvedTokens[i]] = true;
@@ -196,6 +195,7 @@ contract Party is ReentrancyGuard {
         partyGoal = _partyGoal;
         summoningTime = now;
         goalHit = 0;
+        dilutionBound = _dilutionBound;
         
         _initReentrancyGuard();
     }
@@ -228,7 +228,10 @@ contract Party is ReentrancyGuard {
     ) public nonReentrant returns (uint256 proposalId) {
         require(sharesRequested.add(lootRequested) <= MAX_INPUT, "shares maxed");
         if(flagNumber != 7){
-            require(tokenWhitelist[tributeToken] && tokenWhitelist[paymentToken], "tokens not whitelisted");  
+            require(tokenWhitelist[tributeToken] && tokenWhitelist[paymentToken], "tokens not whitelisted");
+            // collect tribute from proposer and store it in the Moloch until the proposal is processed
+            require(IERC20(tributeToken).transferFrom(msg.sender, address(this), tributeOffered), "tribute token transfer failed");
+            unsafeAddToBalance(ESCROW, tributeToken, tributeOffered);
         }
         require(applicant != address(0), "applicant cannot be 0");
         require(members[applicant].jailed == false, "applicant jailed");
@@ -237,9 +240,7 @@ contract Party is ReentrancyGuard {
         // collect deposit from proposer
         require(IERC20(depositToken).transferFrom(msg.sender, address(this), proposalDepositReward), "proposal deposit failed");
         unsafeAddToBalance(ESCROW, paymentToken, proposalDepositReward);
-        // collect tribute from proposer and store it in the Moloch until the proposal is processed
-        require(IERC20(tributeToken).transferFrom(msg.sender, address(this), tributeOffered), "tribute token transfer failed");
-        unsafeAddToBalance(ESCROW, tributeToken, tributeOffered);
+
         
         // check whether pool goal is met before allowing spending proposals
         if(flagNumber == 5) {
@@ -258,7 +259,7 @@ contract Party is ReentrancyGuard {
         } 
         
         else if (flagNumber == 7) { // for amend governance use sharesRequested for partyGoal, tributeRequested for depositRate, tributeToken for new Token, paymentToken for new idleToken
-            _submitProposal(applicant, sharesRequested, lootRequested, 0, tributeToken, 0, paymentToken, details, flags);
+            _submitProposal(applicant, 0, 0, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags);
         } 
         
         else {
@@ -388,8 +389,8 @@ contract Party is ReentrancyGuard {
         uint256 proposalId = proposalQueue[proposalIndex];
         Proposal storage proposal = proposals[proposalId];
         
-        //[sponsored -0 , processed -1, didPass -2, cancelled -3, guildkick -4, spending -5, member -6, action -7]
-        require(!proposal.flags[4], "not standard proposal"); 
+        //[sponsored -0 , processed -1, didPass -2, cancelled -3, guildkick -4, spending -5, member -6, governance -7]
+        require(!proposal.flags[4] && !proposal.flags[7], "not standard proposal"); 
 
         proposal.flags[1] = true; // processed
 
@@ -513,32 +514,33 @@ contract Party is ReentrancyGuard {
                 proposal.flags[2] = true; // didPass
             
             // Updates PartyGoal
-            if(proposal.sharesRequested > 0){
-                partyGoal = proposal.sharesRequested;
+            if(proposal.tributeOffered > 0){
+                partyGoal = proposal.tributeOffered;
             }
             
             // Update depositRate
-            if(proposal.lootRequested > 0){
-                depositRate = proposal.lootRequested;
+            if(proposal.paymentRequested > 0){
+                depositRate = proposal.paymentRequested;
             }
             
             // Adds token to whitelist and approvedTokens
-            if(proposal.tributeToken != address(0)){
+            if(proposal.tributeToken != depositToken) {
+                require(!tokenWhitelist[proposal.tributeToken], "cannot already have whitelisted the token");
                 require(approvedTokens.length < MAX_TOKEN_WHITELIST_COUNT, "too many tokens already");
                 approvedTokens.push(proposal.tributeToken);
                 tokenWhitelist[address(proposal.tributeToken)] = true;
             }
             // Used to upgrade iToken, cannot be used to switch iToken since depositToken is static
-            if(proposal.paymentToken != address(0)){
+            if(proposal.paymentToken != address(idleToken) && proposal.paymentToken != depositToken) {
                 _setIdle(proposal.paymentToken);
                 approvedTokens.push(proposal.paymentToken);
-                tokenWhitelist[address(proposal.tributeToken)] = true;
+                tokenWhitelist[address(proposal.paymentToken)] = true;
             }
         }
 
         _returnDeposit();
         
-        emit ProcessAmendGovernance(proposalIndex, proposalId, didPass, proposal.tributeToken, proposal.paymentToken, proposal.sharesRequested, proposal.lootRequested);
+        emit ProcessAmendGovernance(proposalIndex, proposalId, didPass, proposal.tributeToken, proposal.paymentToken, proposal.tributeOffered, proposal.paymentRequested);
     }
     
 
@@ -548,7 +550,7 @@ contract Party is ReentrancyGuard {
         didPass = proposal.yesVotes > proposal.noVotes;
 
         // Make the proposal fail if the dilutionBound is exceeded
-        if ((totalShares.add(totalLoot)).mul(dilutionBound) < proposal.maxTotalSharesAndLootAtYesVote) {
+        if ((totalShares.add(totalLoot)).mul(dilutionBound / 100) < proposal.maxTotalSharesAndLootAtYesVote) {
             didPass = false;
         }
 
@@ -821,7 +823,7 @@ contract Party is ReentrancyGuard {
         // @Dev updates here b/c solidity doesn't recognize as a view only function
         idleAvgCost = IIdleToken(idleToken).userAvgPrices(address(this));
         
-        emit MakeDeposit(depositor, amount, mintedTokens, shares, idleAvgCost, goalHit);
+        emit MakeDeposit(depositor, amount, mintedTokens, shares, goalHit);
     }
     
     function checkGoal() public returns (uint8) {
@@ -829,9 +831,9 @@ contract Party is ReentrancyGuard {
         uint256 idleValue = getIdleValue(daoFunds);
         
         if(idleValue >= partyGoal){
-            goalHit = 1;
+            return goalHit = 1;
         } else {
-            goalHit = 0;
+            return goalHit = 0;
         }
     }
     
