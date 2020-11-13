@@ -35,6 +35,9 @@ interface IIdleToken {
   function getGovTokensAmounts(address _usr) external view returns (uint256[] memory _amounts);
 }
 
+interface IAAVE {
+    function deposit(address reserve, uint256 amount, uint16 referralCode) external payable;
+}
 
 contract Party is ReentrancyGuard {
     using SafeMath for uint256;
@@ -139,7 +142,10 @@ contract Party is ReentrancyGuard {
 
     mapping(address => bool) public tokenWhitelist;
     address[] public approvedTokens;
-
+    
+    mapping(address => address) public aTokenAssignments; // alias whitelisted tokens to aTokens
+    address[] public aTokens; // list registered aTokens
+     
     mapping(address => bool) public proposedToKick;
 
     mapping(address => Member) public members;
@@ -177,11 +183,12 @@ contract Party is ReentrancyGuard {
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
         emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
-
         for (uint256 i = 0; i < _approvedTokens.length; i++) {
-            require(!tokenWhitelist[_approvedTokens[i]], "token duplicated");
+            require(_approvedTokens[i] != address(0), "_approvedToken cannot be 0");
+            require(!tokenWhitelist[_approvedTokens[i]], "duplicate approved token");
             tokenWhitelist[_approvedTokens[i]] = true;
             approvedTokens.push(_approvedTokens[i]);
+            IERC20(_approvedTokens[i]).approve(0x3dfd23A6c5E8BbcFc9581d2E864a68feb6a076d3, uint256(-1)); // max approve aave for whitelisted token deposit into aToken 
         }
         
         for (uint256 i = 0; i < _founders.length; i++) {
@@ -198,9 +205,7 @@ contract Party is ReentrancyGuard {
         summoningTime = now;
         goalHit = 0;
         
-        _initReentrancyGuard();
-
-        
+        _initReentrancyGuard();      
     }
     
     /****************
@@ -246,6 +251,14 @@ contract Party is ReentrancyGuard {
         // collect tribute from proposer and store it in the Moloch until the proposal is processed
         require(IERC20(tributeToken).transferFrom(msg.sender, address(this), tributeOffered), "tribute token transfer failed");
         unsafeAddToBalance(ESCROW, tributeToken, tributeOffered);
+        
+        if (defiDeposit) {
+            address aToken = aTokenAssignments[tributeToken];
+            IAAVE(0x398eC7346DcD622eDc5ae82352F02bE94C62d119).deposit(tributeToken, tributeOffered, 0); // deposit to aave lending pool
+            unsafeAddToBalance(ESCROW, aToken, tributeOffered);
+        } else {
+            unsafeAddToBalance(ESCROW, tributeToken, tributeOffered);
+        }
         
         // check whether pool goal is met before allowing spending proposals
         if(flagNumber == 5) {
