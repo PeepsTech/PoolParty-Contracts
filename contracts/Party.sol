@@ -91,14 +91,12 @@ contract Party is ReentrancyGuard {
     // *******************
     // INTERNAL ACCOUNTING
     // *******************
-
     uint8 public goalHit; // tracks whether goal has been hit
     uint256 public proposalCount; // total proposals submitted
     uint256 public totalShares; // total shares across all members
     uint256 public totalLoot; // total loot across all members
     uint256 public totalDeposits; //track deposits made for goal
     uint256 public idleAvgCost; // track avg cost to be efficient with gas
-
 
     address public constant GUILD = address(0xdead);
     address public constant ESCROW = address(0xbeef);
@@ -143,7 +141,7 @@ contract Party is ReentrancyGuard {
     mapping(address => bool) public tokenWhitelist;
     address[] public approvedTokens;
     
-    mapping(address => address) public aTokenAssignments; // alias whitelisted tokens to aTokens
+    mapping(address => address) public aTokenAssignments; // map whitelisted tokens to aTokens
     address[] public aTokens; // list registered aTokens
      
     mapping(address => bool) public proposedToKick;
@@ -154,8 +152,7 @@ contract Party is ReentrancyGuard {
     mapping(uint256 => Proposal) public proposals;
     uint256[] public proposalQueue;
     mapping(uint256 => bytes) public actions; // proposalId => action data
-
-    
+   
     /******************
     SUMMONING FUNCTIONS
     ******************/
@@ -188,7 +185,7 @@ contract Party is ReentrancyGuard {
             require(!tokenWhitelist[_approvedTokens[i]], "duplicate approved token");
             tokenWhitelist[_approvedTokens[i]] = true;
             approvedTokens.push(_approvedTokens[i]);
-            IERC20(_approvedTokens[i]).approve(0x3dfd23A6c5E8BbcFc9581d2E864a68feb6a076d3, uint256(-1)); // max approve aave for whitelisted token deposit into aToken 
+            IERC20(_approvedTokens[i]).approve(0x3dfd23A6c5E8BbcFc9581d2E864a68feb6a076d3, uint256(-1)); // max approve aave for deposit into aToken 
         }
         
         for (uint256 i = 0; i < _founders.length; i++) {
@@ -235,7 +232,8 @@ contract Party is ReentrancyGuard {
         uint256 flagNumber,
         address tributeToken,
         address paymentToken,
-        bytes32 details
+        bytes32 details,
+        bool aToken
     ) public nonReentrant returns (uint256 proposalId) {
         require(sharesRequested.add(lootRequested) <= MAX_INPUT, "shares maxed");
         if(flagNumber != 7){
@@ -252,7 +250,7 @@ contract Party is ReentrancyGuard {
         require(IERC20(tributeToken).transferFrom(msg.sender, address(this), tributeOffered), "tribute token transfer failed");
         unsafeAddToBalance(ESCROW, tributeToken, tributeOffered);
         
-        if (defiDeposit) {
+        if (aToken) { // TO-DO make aave addresses amendable per gov update
             address aToken = aTokenAssignments[tributeToken];
             IAAVE(0x398eC7346DcD622eDc5ae82352F02bE94C62d119).deposit(tributeToken, tributeOffered, 0); // deposit to aave lending pool
             unsafeAddToBalance(ESCROW, aToken, tributeOffered);
