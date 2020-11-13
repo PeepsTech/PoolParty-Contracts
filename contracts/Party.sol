@@ -222,7 +222,7 @@ contract Party is ReentrancyGuard {
         idleToken = _idleToken;
     }
     
-
+    // WIP - Ross: instead of creating local alias, mapping between tributeToken <> aToken, maybe just have this be user input? tx would fail if not matching?
     /*****************
     PROPOSAL FUNCTIONS
     *****************/
