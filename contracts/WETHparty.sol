@@ -253,7 +253,7 @@ contract WETHParty is ReentrancyGuard {
         require(_approvedTokens.length > 0, "need token");
         
         depositToken = _approvedTokens[0];
-        wETH = _approvedTokens[1];
+        wETH = _approvedTokens[0];
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
         emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
@@ -503,13 +503,17 @@ contract WETHParty is ReentrancyGuard {
             if (members[proposal.applicant].exists) {
                 members[proposal.applicant].shares = members[proposal.applicant].shares.add(proposal.sharesRequested);
                 members[proposal.applicant].loot = members[proposal.applicant].loot.add(proposal.lootRequested);
-
+               
+               // update member iTB and iVal
+                if(proposal.sharesRequested > 0 || proposal.lootRequested > 0){
+                    members[proposal.applicant].iTB += proposal.tributeOffered;
+                    members[proposal.applicant].iVal += proposal.tributeOffered;
+                }
+                
             // the applicant is a new member, create a new record for them
             } else {
                 members[proposal.applicant] = Member(proposal.sharesRequested, proposal.lootRequested, proposal.tributeOffered, 0, proposal.tributeOffered, 0, false, true);
                 memberList.push(proposal.applicant);
-                earningsPeg += proposal.tributeOffered;
-                
             }
 
             // mint new shares & loot
@@ -518,7 +522,15 @@ contract WETHParty is ReentrancyGuard {
 
             unsafeInternalTransfer(ESCROW, GUILD, proposal.tributeToken, proposal.tributeOffered);
             unsafeInternalTransfer(GUILD, proposal.applicant, proposal.paymentToken, proposal.paymentRequested);
-            earningsPeg -= proposal.paymentRequested;
+            
+            // update earningsPeg for membership proposals and spending proposals
+            if (proposal.sharesRequested > 0 || proposal.lootRequested > 0) {
+                earningsPeg += proposal.tributeOffered;
+            }
+            
+            if (proposal.paymentRequested > 0 && proposal.sharesRequested < 1) {
+                earningsPeg -= proposal.paymentRequested;
+            }
 
         // PROPOSAL FAILED
         } else {
@@ -628,6 +640,7 @@ contract WETHParty is ReentrancyGuard {
 
         return didPass;
     }
+    
 
     function _validateProposalForProcessing(uint256 proposalIndex) internal view {
         require(proposalIndex < proposalQueue.length, "no such proposal");
@@ -671,7 +684,7 @@ contract WETHParty is ReentrancyGuard {
         totalShares = totalShares.sub(sharesToBurn);
         totalLoot = totalLoot.sub(lootToBurn);
         
-        uint256 feeEligible = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootToBurn, initialTotalSharesAndLoot).sub(member.iVal);
+        uint256 feeEligible = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootToBurn, initialTotalSharesAndLoot).sub(member.iTB);
         subFees(GUILD, feeEligible);
 
         for (uint256 i = 0; i < approvedTokens.length; i++) {
@@ -685,7 +698,7 @@ contract WETHParty is ReentrancyGuard {
                     
                  if(member.iTW > 0) {
                     // @Dev - SafeMath wasn't working here. 
-                     uint256 iAdj = amountToRagequit - member.iTW;
+                     uint256 iAdj = member.iTW;
                      if(iAdj > 0) {
                         unsafeInternalTransfer(memberAddress, GUILD, address(wETH), iAdj);
                      }
@@ -730,6 +743,7 @@ contract WETHParty is ReentrancyGuard {
 
         // Accounting updates
         member.iTW += earningsToUser;
+        member.iTB -= earningsToUser;
         earningsPeg -= earningsToUser;
         unsafeInternalTransfer(GUILD, memberAddress, address(wETH), earningsToUser);
         
@@ -840,9 +854,9 @@ contract WETHParty is ReentrancyGuard {
     HELPER FUNCTIONS
     ***************/
     
-    // 2% fee on earnings
+
     function subFees(address holder, uint256 amount) internal returns (uint256) {
-        uint256 poolFees = amount.div(uint256(100).div(50));
+        uint256 poolFees = amount.div(uint256(100).div(50)); // 2% fee on earnings
         unsafeInternalTransfer(holder, daoFee, address(wETH), poolFees);
         return amount.sub(poolFees);
     }
