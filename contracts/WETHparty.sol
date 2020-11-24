@@ -856,7 +856,7 @@ contract WETHParty is ReentrancyGuard {
     
 
     function subFees(address holder, uint256 amount) internal returns (uint256) {
-        uint256 poolFees = amount.div(uint256(100).div(50)); // 2% fee on earnings
+        uint256 poolFees = amount.div(uint256(100).div(2)); // 2% fee on earnings
         unsafeInternalTransfer(holder, daoFee, address(wETH), poolFees);
         return amount.sub(poolFees);
     }
