@@ -135,6 +135,7 @@ contract WETHParty is ReentrancyGuard {
     address public daoFee; // address where fees are sent
     address public depositToken; // deposit token contract reference; default = periodDuration
     address public wETH;
+    address public idleToken; // = WETH address 
     
     bool public initialized;
 
@@ -172,7 +173,7 @@ contract WETHParty is ReentrancyGuard {
     uint256 public proposalCount; // total proposals submitted
     uint256 public totalShares; // total shares across all members
     uint256 public totalLoot; // total loot across all members
-    uint256 public earningsPeg; //track earnings by accounting for spending proposals 
+    uint256 public totalDeposits; //track deposits made for goal and peg for earnings 
 
 
     address public constant GUILD = address(0xdead);
@@ -254,6 +255,8 @@ contract WETHParty is ReentrancyGuard {
         
         depositToken = _approvedTokens[0];
         wETH = _approvedTokens[0];
+        idleToken = _approvedTokens[0]; // Same address as WETH
+        
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
         emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
@@ -288,8 +291,9 @@ contract WETHParty is ReentrancyGuard {
     }
     
     // Can also be used to upgrade the idle contract, but not switch to new DeFi token (ie. iDAI to iUSDC)
-     function _setWETH(address _wETH) internal {
+     function _setIdle(address _wETH) internal {
          wETH = _wETH;
+         idleToken = _wETH;
      }
     
 
@@ -525,11 +529,11 @@ contract WETHParty is ReentrancyGuard {
             
             // update earningsPeg for membership proposals and spending proposals
             if (proposal.sharesRequested > 0 || proposal.lootRequested > 0) {
-                earningsPeg += proposal.tributeOffered;
+                totalDeposits += proposal.tributeOffered;
             }
             
             if (proposal.paymentRequested > 0 && proposal.sharesRequested < 1) {
-                earningsPeg -= proposal.paymentRequested;
+                totalDeposits -= proposal.paymentRequested;
             }
 
         // PROPOSAL FAILED
@@ -609,7 +613,7 @@ contract WETHParty is ReentrancyGuard {
             }
             // Used to upgrade wETH address
             if(proposal.paymentToken != address(wETH) && proposal.paymentToken != depositToken) {
-                _setWETH(proposal.paymentToken);
+                _setIdle(proposal.paymentToken);
                 approvedTokens.push(proposal.paymentToken);
                 tokenWhitelist[address(proposal.paymentToken)] = true;
             }
@@ -692,7 +696,7 @@ contract WETHParty is ReentrancyGuard {
             if (amountToRagequit > 0) { // gas optimization to allow a higher maximum token limit
                 userTokenBalances[GUILD][approvedTokens[i]] -= amountToRagequit;
                 userTokenBalances[memberAddress][approvedTokens[i]] += amountToRagequit;
-                earningsPeg -= amountToRagequit;
+                totalDeposits -= amountToRagequit;
                 // Only runs guild bank adjustment if member has withdrawn tokens.
                 // Otherwise, adjustment would end up costing member their fair share
                     
@@ -736,7 +740,7 @@ contract WETHParty is ReentrancyGuard {
 
         //Calculates if user's share of wETH in the pool is creater than their deposit amts (used for potential earnings)
         uint256 iTBVal = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootM, initialTotalSharesAndLoot);
-        uint256 iBase = earningsPeg.div(initialTotalSharesAndLoot).mul(sharesAndLootM);
+        uint256 iBase = totalDeposits.div(initialTotalSharesAndLoot).mul(sharesAndLootM);
         require(iTBVal.sub(iBase) >= amount, "not enough earnings to redeem this many tokens");
         
         uint256 earningsToUser = subFees(GUILD, amount);
@@ -744,7 +748,7 @@ contract WETHParty is ReentrancyGuard {
         // Accounting updates
         member.iTW += earningsToUser;
         member.iTB -= earningsToUser;
-        earningsPeg -= earningsToUser;
+        totalDeposits -= earningsToUser;
         unsafeInternalTransfer(GUILD, memberAddress, address(wETH), earningsToUser);
         
         emit WithdrawEarnings(msg.sender, address(wETH), earningsToUser, depositToken);
@@ -853,6 +857,26 @@ contract WETHParty is ReentrancyGuard {
     /***************
     HELPER FUNCTIONS
     ***************/
+    function getUserEarnings(uint256 amount) public returns (uint256) {
+        uint256 initialTotalSharesAndLoot = totalShares.add(totalLoot);
+        
+        Member storage member = members[msg.sender];
+        uint256 sharesM = member.shares;
+        uint256 lootM = member.loot;
+        uint256 sharesAndLootM = sharesM.add(lootM);
+        
+        uint256 iTBVal = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootM, initialTotalSharesAndLoot);
+        uint256 iBase = totalDeposits.div(initialTotalSharesAndLoot).mul(sharesAndLootM);
+        
+        uint256 earnings = iTBVal.sub(iBase);
+
+        return earnings;
+    }
+    
+    
+    function getIdleValue(uint256 amount) public view returns (uint256){
+        return 0;
+    }
     
 
     function subFees(address holder, uint256 amount) internal returns (uint256) {
@@ -874,13 +898,13 @@ contract WETHParty is ReentrancyGuard {
         require(members[msg.sender].shares <= partyGoal.div(depositRate).div(2), "can't take over 50% of the shares w/o a proposal");
         totalShares += shares;
         
-        depositToWETH(msg.sender, amount, shares);
+        depositToIdle(msg.sender, amount, shares);
     }
     
-    
-    function depositToWETH(address depositor, uint256 amount, uint256 shares) internal {
+    // @Dev use better naming conventions next time (actually just updates internal accting)
+    function depositToIdle(address depositor, uint256 amount, uint256 shares) internal {
         require(amount != 0, "no tokens to deposit");
-        earningsPeg += amount;
+        totalDeposits += amount;
         uint256 mintedTokens = amount;
         
         // Update internal accounting
