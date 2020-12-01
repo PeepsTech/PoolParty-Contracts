@@ -162,7 +162,7 @@ contract WETHParty is ReentrancyGuard {
     event TokensCollected(address indexed token, uint256 amountToCollect);
     event CancelProposal(uint256 indexed proposalId, address applicantAddress);
     event UpdateDelegateKey(address indexed memberAddress, address newDelegateKey);
-    event WithdrawEarnings(address indexed memberAddress, address wETH, uint256 earningsToUser, address depositToken);
+    event WithdrawEarnings(address indexed memberAddress, address idleToken, uint256 earningsToUser, address depositToken);
     event Withdraw(address indexed memberAddress, address token, uint256 amount);
 
     // *******************
@@ -885,14 +885,15 @@ contract WETHParty is ReentrancyGuard {
         return amount.sub(poolFees);
     }
 
-    function makeDeposit() external payable nonReentrant {
+    function makeDeposit(uint256 amount) external payable nonReentrant {
         require(members[msg.sender].exists == true, 'must be member to deposit shares');
+        require(amount == msg.value);
         
         (bool success, ) = wETH.call{value: msg.value}("");
         require(success, "!ethCall");
         IERC20(wETH).safeTransfer(address(this), msg.value);
          
-        uint256 amount = msg.value;
+        amount = msg.value;
         uint256 shares = amount.div(depositRate);
         members[msg.sender].shares += shares;
         require(members[msg.sender].shares <= partyGoal.div(depositRate).div(2), "can't take over 50% of the shares w/o a proposal");
