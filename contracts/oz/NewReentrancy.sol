@@ -1,4 +1,5 @@
-pragma solidity 0.5.17;
+// SPDX-License-Identifier: MIT
+pragma solidity >=0.6.0 <0.8.0;
 
 contract ReentrancyGuard { // call wrapper for reentrancy check
     bool private _notEntered;
