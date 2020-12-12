@@ -6,7 +6,7 @@ contract ReentrancyGuard { // call wrapper for reentrancy check - see https://gi
     uint256 private constant _ENTERED = 2;
     uint256 private _status;
 
-    constructor() {
+    constructor() public {
         _status = _NOT_ENTERED;
     }
 
