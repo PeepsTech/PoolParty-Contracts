@@ -1,4 +1,4 @@
-pragma solidity 0.5.17;
+pragma solidity 0.6.12;
 
 // ["0x4F96Fe3b7A6Cf9725f59d353F723c1bDb64CA6Aa","0x295CA5bC5153698162dDbcE5dF50E436a58BA21e"] kDAI, kIdleDAI
 // ["0xDE2C7c260C851c0AF3db31409D0585bbE9D20a78","0x7136fbDdD4DFfa2369A9283B6E90A040318011Ca","0x3792acDf2A8658FBaDe0ea70C47b89cB7777A5a5"] test members
@@ -8,11 +8,7 @@ pragma solidity 0.5.17;
 import "./SafeMath.sol";
 import "./IERC20.sol";
 import "./NewReentrancy.sol";
-
-// TO - DO: add withdrawal
-interface IAAVE {
-    function deposit(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
-}
+import "./IAAVE.sol";
 
 contract AaveParty is ReentrancyGuard {
     using SafeMath for uint256;
