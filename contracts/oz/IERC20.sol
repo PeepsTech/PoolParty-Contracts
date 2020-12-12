@@ -1,4 +1,5 @@
-pragma solidity ^0.5.17;
+// SPDX-License-Identifier: MIT
+pragma solidity >=0.6.0 <0.8.0;
 
 interface IERC20 { // brief interface for moloch erc20 token txs
     function balanceOf(address who) external view returns (uint256);
