@@ -1,6 +1,8 @@
-pragma solidity 0.6.12;
+// SPDX-License-Identifier: MIT
+pragma solidity >=0.6.0 <0.8.0;
 
-interface IAAVE {
+interface IAAVEDepositWithdraw {
     function deposit(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
     function withdraw(address token, uint256 amount, address destination) external;
+    function getReservesList() external view returns (address[] memory);
 }
