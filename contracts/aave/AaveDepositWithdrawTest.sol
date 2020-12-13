@@ -15,7 +15,6 @@ interface IERC20ApproveTransferFrom {
 // tester contract for aave protocol deposit / withdraw 
 contract AaveDepositWithdrawTest {
     address aave;
-    address owner;
     
     constructor(address[] memory approvedAssets) public {
         for (uint256 i = 0; i < approvedAssets.length; i++) {
@@ -23,7 +22,6 @@ contract AaveDepositWithdrawTest {
         }
         
         aave = 0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9;
-        owner = msg.sender; // set deployer as owner of contract
     }
     
     function deposit(address token, uint256 amount) external {
