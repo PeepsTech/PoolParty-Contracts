@@ -636,17 +636,17 @@ contract AaveParty is ReentrancyGuard {
         
         // Calculates user's share of aave interest earned in the pool and grants underlying to pull account 
         for (uint256 i = 0; i < approvedTokens.length; i++) {
-            uint256 claimable = fairShare(IERC20(aTokenAssignments[approvedTokens[i]]).balanceOf(address(this)), sharesAndLootM, initialTotalSharesAndLoot).sub(member.aTokenRedemptions[count]);
-            require(claimable >= amount[i], "insufficient earnings");
-            uint256 fee = amount[i].div(uint256(100)).div(2); // 2% fee on earnings
-            uint256 claim = amount[i].sub(fee);
+            //uint256 claimable = fairShare(IERC20(aTokenAssignments[approvedTokens[i]]).balanceOf(address(this)), sharesAndLootM, initialTotalSharesAndLoot).sub(member.aTokenRedemptions[count]);
+            //require(claimable >= amount[i], "insufficient earnings");
+            //uint256 fee = amount[i].div(uint256(100)).div(2); // 2% fee on earnings
+            //uint256 claim = amount[i].sub(fee);
             
-            IAaveDepositWithdraw(aave).withdraw(approvedTokens[i], claim, address(this));
-            unsafeAddToBalance(msg.sender, approvedTokens[i], claim);
-            member.aTokenRedemptions[count] = member.aTokenRedemptions[count].add(claim);
+            //IAaveDepositWithdraw(aave).withdraw(approvedTokens[i], claim, address(this));
+            //unsafeAddToBalance(msg.sender, approvedTokens[i], claim);
+            //member.aTokenRedemptions[count] = member.aTokenRedemptions[count].add(claim);
             
             count++;
-            emit WithdrawEarnings(msg.sender, claim);
+            //emit WithdrawEarnings(msg.sender, claim);
         }
     }
 
