@@ -162,7 +162,7 @@ contract WETHParty is ReentrancyGuard {
     event TokensCollected(address indexed token, uint256 amountToCollect);
     event CancelProposal(uint256 indexed proposalId, address applicantAddress);
     event UpdateDelegateKey(address indexed memberAddress, address newDelegateKey);
-    event WithdrawEarnings(address indexed memberAddress, address idleToken, uint256 earningsToUser, address depositToken);
+    event WithdrawEarnings(address indexed memberAddress, address iToken, uint256 earningsToUser, address depositToken, uint256 redeemedTokens);
     event Withdraw(address indexed memberAddress, address token, uint256 amount);
 
     // *******************
@@ -173,7 +173,7 @@ contract WETHParty is ReentrancyGuard {
     uint256 public proposalCount; // total proposals submitted
     uint256 public totalShares; // total shares across all members
     uint256 public totalLoot; // total loot across all members
-    uint256 public totalDeposits; //track deposits made for goal and peg for earnings 
+    int256 public totalDeposits; //track deposits made for goal and peg for earnings 
 
 
     address public constant GUILD = address(0xdead);
@@ -529,11 +529,11 @@ contract WETHParty is ReentrancyGuard {
             
             // update earningsPeg for membership proposals and spending proposals
             if (proposal.sharesRequested > 0 || proposal.lootRequested > 0) {
-                totalDeposits += proposal.tributeOffered;
+                totalDeposits -= int(proposal.paymentRequested);
             }
             
             if (proposal.paymentRequested > 0 && proposal.sharesRequested < 1) {
-                totalDeposits -= proposal.paymentRequested;
+                totalDeposits -= int(proposal.paymentRequested);
             }
 
         // PROPOSAL FAILED
@@ -689,14 +689,14 @@ contract WETHParty is ReentrancyGuard {
         totalLoot = totalLoot.sub(lootToBurn);
         
         uint256 feeEligible = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootToBurn, initialTotalSharesAndLoot).sub(member.iTB);
-        subFees(GUILD, feeEligible);
+        subFees(GUILD, feeEligible, address(wETH));
 
         for (uint256 i = 0; i < approvedTokens.length; i++) {
             uint256 amountToRagequit = fairShare(userTokenBalances[GUILD][approvedTokens[i]], sharesAndLootToBurn, initialTotalSharesAndLoot);
             if (amountToRagequit > 0) { // gas optimization to allow a higher maximum token limit
                 userTokenBalances[GUILD][approvedTokens[i]] -= amountToRagequit;
                 userTokenBalances[memberAddress][approvedTokens[i]] += amountToRagequit;
-                totalDeposits -= amountToRagequit;
+                totalDeposits -= int(amountToRagequit);
                 // Only runs guild bank adjustment if member has withdrawn tokens.
                 // Otherwise, adjustment would end up costing member their fair share
                     
@@ -739,19 +739,20 @@ contract WETHParty is ReentrancyGuard {
         require(address(msg.sender) == memberAddress, "can only be called by member");
 
         //Calculates if user's share of wETH in the pool is creater than their deposit amts (used for potential earnings)
-        uint256 iTBVal = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootM, initialTotalSharesAndLoot);
-        uint256 iBase = totalDeposits.div(initialTotalSharesAndLoot).mul(sharesAndLootM);
+        uint256 iTBVal = fairShare(userTokenBalances[GUILD][idleToken], sharesAndLootM, initialTotalSharesAndLoot);
+        uint256 iBase = abs(totalDeposits).div(initialTotalSharesAndLoot).mul(sharesAndLootM).add(member.iTW);
         require(iTBVal.sub(iBase) >= amount, "not enough earnings to redeem this many tokens");
         
-        uint256 earningsToUser = subFees(GUILD, amount);
+        uint256 earningsToUser = subFees(GUILD, amount, address(wETH));
+        uint256 redeemedTokens = amount; 
+        
+        emit WithdrawEarnings(msg.sender, address(wETH), earningsToUser, depositToken, redeemedTokens);
 
         // Accounting updates
-        member.iTW += earningsToUser;
-        member.iTB -= earningsToUser;
-        totalDeposits -= earningsToUser;
+        member.iTW += amount;
+        member.iTB -= amount;
+        totalDeposits -= int(amount);
         unsafeInternalTransfer(GUILD, memberAddress, address(wETH), earningsToUser);
-        
-        emit WithdrawEarnings(msg.sender, address(wETH), earningsToUser, depositToken);
     }
     
 
@@ -865,8 +866,8 @@ contract WETHParty is ReentrancyGuard {
         uint256 lootM = member.loot;
         uint256 sharesAndLootM = sharesM.add(lootM);
         
-        uint256 iTBVal = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootM, initialTotalSharesAndLoot);
-        uint256 iBase = totalDeposits.div(initialTotalSharesAndLoot).mul(sharesAndLootM);
+        uint256 iTBVal = fairShare(userTokenBalances[GUILD][idleToken], sharesAndLootM, initialTotalSharesAndLoot);
+        uint256 iBase = abs(totalDeposits).div(initialTotalSharesAndLoot).mul(sharesAndLootM).add(member.iTW);
         
         uint256 earnings = iTBVal.sub(iBase);
 
@@ -879,21 +880,23 @@ contract WETHParty is ReentrancyGuard {
     }
     
 
-    function subFees(address holder, uint256 amount) internal returns (uint256) {
-        uint256 poolFees = amount.div(uint256(100).div(2)); // 2% fee on earnings
-        unsafeInternalTransfer(holder, daoFee, address(wETH), poolFees);
+    function subFees(address holder, uint256 amount, address token) internal returns (uint256) {
+        /* 10% Fee on earnings
+           Earnings here are tokens deposited into the DAO w/o a share request
+        */
+        uint256 poolFees = amount.div(uint256(1000).div(10)); // 1% fee on earnings
+        unsafeInternalTransfer(holder, daoFee, address(token), poolFees);
         return amount.sub(poolFees);
     }
 
-    function makeDeposit(uint256 amount) external payable nonReentrant {
+    function makeDeposit() external payable nonReentrant {
         require(members[msg.sender].exists == true, 'must be member to deposit shares');
-        require(amount == msg.value);
         
         (bool success, ) = wETH.call{value: msg.value}("");
         require(success, "!ethCall");
         IERC20(wETH).safeTransfer(address(this), msg.value);
          
-        amount = msg.value;
+        uint256 amount = msg.value;
         uint256 shares = amount.div(depositRate);
         members[msg.sender].shares += shares;
         require(members[msg.sender].shares <= partyGoal.div(depositRate).div(2), "can't take over 50% of the shares w/o a proposal");
@@ -905,7 +908,7 @@ contract WETHParty is ReentrancyGuard {
     // @Dev use better naming conventions next time (actually just updates internal accting)
     function depositToIdle(address depositor, uint256 amount, uint256 shares) internal {
         require(amount != 0, "no tokens to deposit");
-        totalDeposits += amount;
+        totalDeposits += int(amount);
         uint256 mintedTokens = amount;
         
         // Update internal accounting
@@ -958,4 +961,9 @@ contract WETHParty is ReentrancyGuard {
 
         return (balance / totalSharesAndLoot) * shares;
     } 
+    
+    function abs(int x) internal pure returns (uint) {
+        
+        return uint(x) >= 0 ? uint(x) : uint(-x);
+    }    
 }

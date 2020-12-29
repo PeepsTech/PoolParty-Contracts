@@ -239,7 +239,7 @@ contract Party is ReentrancyGuard {
         
         // collect deposit from proposer
         require(IERC20(depositToken).transferFrom(msg.sender, address(this), proposalDepositReward), "proposal deposit failed");
-        unsafeAddToBalance(ESCROW, paymentToken, proposalDepositReward);
+        unsafeAddToBalance(ESCROW, depositToken, proposalDepositReward);
 
         
         // check whether pool goal is met before allowing spending proposals
