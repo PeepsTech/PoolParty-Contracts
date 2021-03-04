@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
 
 library SafeMath { // arithmetic wrapper for under/overflow check
@@ -66,6 +65,7 @@ interface IAaveDepositWithdraw {
     function deposit(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
     function withdraw(address token, uint256 amount, address destination) external;
     function getReservesList() external view returns (address[] memory);
+    function getAssetsPrices(address[] calldata _assets) external view returns(uint256[] memory);
     function UNDERLYING_ASSET_ADDRESS() external view returns (address);
 }
 
@@ -82,6 +82,8 @@ contract AaveParty is ReentrancyGuard {
     uint256 public depositRate; // rate to convert into shares during summoning time (default = 10000000000000000000 wei amt. // 100 wETH => 10 shares)
     uint256 public summoningTime; // needed to determine the current period
     uint256 public partyGoal; // savings goal for DAO 
+    uint256 public dilutionBound;
+
     
     address public aave; // aave lending pool contract reference  
     address public depositToken; // deposit token contract reference
@@ -90,9 +92,8 @@ contract AaveParty is ReentrancyGuard {
     // HARD-CODED LIMITS
     // These numbers are quite arbitrary; they are small enough to avoid overflows when doing calculations
     // with periods or shares, yet big enough to not limit reasonable use cases.
-    uint256 constant dilutionBound = 5; // default = 5
-    uint256 constant MAX_INPUT = 10**36; // maximum bound for reasonable limits
-    uint256 constant MAX_TOKEN_WHITELIST_COUNT = 100; // maximum number of whitelisted tokens
+    uint256 public constant MAX_INPUT = 10**36; // maximum bound for reasonable limits
+    uint256 public constant MAX_TOKEN_WHITELIST_COUNT = 100; // maximum number of whitelisted tokens
 
     // ***************
     // EVENTS
@@ -125,6 +126,7 @@ contract AaveParty is ReentrancyGuard {
     address public constant ESCROW = address(0xbeef);
     address public constant TOTAL = address(0xbabe);
     mapping(address => mapping(address => uint256)) public userTokenBalances; // userTokenBalances[userAddress][tokenAddress]
+    mapping(address => int) public aTokenDeposits; // tracks DAO balance of aTokens to calc what's earnings
 
     enum Vote {
         Null, // default value, counted as abstention
@@ -136,6 +138,7 @@ contract AaveParty is ReentrancyGuard {
         uint256 shares; // the # of voting shares assigned to this member
         uint256 loot; // the loot amount available to this member (combined with shares on ragequit)
         mapping(address => uint256) aTokenRedemptions; // interest withdrawn from array of approvedTokens (reflecting burn of accumulated aTokens)
+        mapping(address => uint256) aTokenDeposits; // interest withdrawn from array of approvedTokens (reflecting burn of accumulated aTokens)
         uint256 highestIndexYesVote; // highest proposal index # on which the member voted YES
         bool jailed; // set to proposalIndex of a passing guild kick proposal for this member, prevents voting on and sponsoring proposals
         bool exists; // always true once a member has been created
@@ -162,9 +165,11 @@ contract AaveParty is ReentrancyGuard {
 
     mapping(address => bool) public tokenWhitelist;
     address[] public approvedTokens;
+    
     address[] public aTokens;
     mapping(address => address) public aTokenAssignments; // map whitelisted `underlying` tokens (tribute to join guild) to aTokens (guild savings strategy)
-     
+  
+    
     mapping(address => bool) public proposedToKick;
 
     mapping(address => Member) public members;
@@ -184,6 +189,7 @@ contract AaveParty is ReentrancyGuard {
         uint256 _gracePeriodLength,
         uint256 _proposalDepositReward,
         uint256 _depositRate,
+        uint256 _dilutionBound,
         uint256 _partyGoal
     ) public {
         require(!initialized, "initialized");
@@ -222,6 +228,7 @@ contract AaveParty is ReentrancyGuard {
         proposalDepositReward = _proposalDepositReward;
         depositRate = _depositRate;
         partyGoal = _partyGoal;
+        dilutionBound = _dilutionBound;
         summoningTime = block.timestamp;
         goalHit = 0;
     }
@@ -444,10 +451,13 @@ contract AaveParty is ReentrancyGuard {
             if (proposal.tributeOffered > 0) {
                 unsafeSubtractFromBalance(ESCROW, proposal.tributeToken, proposal.tributeOffered); // remove underlying from ESCROW accounting 
                 IAaveDepositWithdraw(aave).deposit(proposal.tributeToken, proposal.tributeOffered, address(this), 0); // deposit underlying to aave to get equal aToken back into local guild balance
+                members[proposal.applicant].aTokenDeposits[proposal.tributeToken] += proposal.tributeOffered;
+                aTokenDeposits[proposal.tributeToken] += int(proposal.tributeOffered); // update internal accounting for that token
             } 
             
             if (proposal.paymentRequested > 0) {
                 IAaveDepositWithdraw(aave).withdraw(proposal.paymentToken, proposal.paymentRequested, address(this)); // burn aToken from local guild balance
+                aTokenDeposits[proposal.paymentToken] -= int(proposal.paymentRequested);
                 unsafeAddToBalance(proposal.applicant, proposal.paymentToken, proposal.paymentRequested); // deposit underlying to applicant guild pull account
             }
  
@@ -603,7 +613,19 @@ contract AaveParty is ReentrancyGuard {
             if (amountToRagequit > 0) { // gas optimization to allow a higher maximum token limit
                 IAaveDepositWithdraw(aave).withdraw(approvedTokens[i], amountToRagequit, address(this));
                 unsafeAddToBalance(memberAddress, approvedTokens[i], amountToRagequit);
+                
+                if(member.aTokenRedemptions[aTokens[i]] > 0){
+                   uint256 aTokenAdj = amountToRagequit.sub(member.aTokenDeposits[aTokens[i]]);
+                   if(aTokenAdj > 0){
+                       unsafeInternalTransfer(memberAddress, GUILD, address(aTokens[i]), aTokenAdj);
+                   }
+                    aTokenDeposits[aTokens[i]] -= int(amountToRagequit);
+                    aTokenDeposits[aTokens[i]] += int(aTokenAdj);
+                } else {
+                    aTokenDeposits[aTokens[i]] -= int(amountToRagequit);
+                }
                 member.aTokenRedemptions[aTokens[i]] = 0; // reset member claimed earnings 
+                member.aTokenDeposits[aTokens[i]] = 0; // reset member claimed earnings 
             }
         }
 
@@ -630,12 +652,13 @@ contract AaveParty is ReentrancyGuard {
         
         // Calculates user's share of aave interest earned in the pool and grants underlying to pull account 
         for (uint256 i = 0; i < aTokens.length; i++) {
-            uint256 claimable = fairShare(IERC20(aTokens[i]).balanceOf(address(this)), sharesAndLootM, initialTotalSharesAndLoot).sub(member.aTokenRedemptions[aTokens[i]]);
-            require(claimable >= amount[i], "insufficient earnings");
+            uint256 claimable = fairShare(IERC20(aTokens[i]).balanceOf(address(this)), sharesAndLootM, initialTotalSharesAndLoot);
+            uint256 base = abs(aTokenDeposits[aTokens[i]]).div(initialTotalSharesAndLoot).mul(sharesAndLootM).add(member.aTokenRedemptions[aTokens[i]]);
+            require(claimable >= base, "insufficient earnings");
             
-            IAaveDepositWithdraw(aave).withdraw(approvedTokens[i], claimable, address(this));
-            unsafeAddToBalance(msg.sender, approvedTokens[i], claimable);
-            member.aTokenRedemptions[aTokens[i]] += claimable;
+            IAaveDepositWithdraw(aave).withdraw(approvedTokens[i], amount[i], address(this));
+            unsafeAddToBalance(msg.sender, approvedTokens[i], amount[i]);
+            member.aTokenRedemptions[aTokens[i]] += amount[i];
             
             emit WithdrawEarnings(msg.sender, claimable);
         }
@@ -732,7 +755,7 @@ contract AaveParty is ReentrancyGuard {
     /***************
     HELPER FUNCTIONS
     ***************/
-    function makeDeposit(uint256 amount) external nonReentrant {
+    function makeDeposit(address token, uint256 amount) external nonReentrant {
         require(members[msg.sender].exists == true, 'must be member to deposit shares');
         
         uint256 shares = amount.div(depositRate);
@@ -740,23 +763,34 @@ contract AaveParty is ReentrancyGuard {
         require(members[msg.sender].shares <= partyGoal.div(depositRate).div(2), "can't take over 50% of the shares w/o a proposal");
         totalShares += shares;
         
-        require(IERC20(depositToken).transferFrom(msg.sender, address(this), amount), "token transfer failed");
-        IAaveDepositWithdraw(aave).deposit(depositToken, amount, address(this), 0); // deposit to aave - return aToken to guild balance 
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "token transfer failed");
+        IAaveDepositWithdraw(aave).deposit(token, amount, address(this), 0); // deposit to aave - return aToken to guild balance 
+        members[msg.sender].aTokenDeposits[token] += amount;
+        aTokenDeposits[token] += int(amount);
         
+        if(token == depositToken){
+            totalDeposits += amount;
+        }
+
         // Checks to see if goal has been reached with this deposit
+        // TODO: See if can use simple Aave oracle to collect prices for all aTokens
         goalHit = checkGoal();
         
         emit MakeDeposit(msg.sender, amount, shares, goalHit);
     }
     
     function checkGoal() public returns (uint8) {
+        
         uint256 daoFunds = IERC20(aTokenAssignments[depositToken]).balanceOf(address(this));
         
-        if(daoFunds >= partyGoal){
-            goalHit = 1;
+        if(goalHit == 1){
+            return goalHit = 1;
+        } else if (daoFunds >= partyGoal){
+            return goalHit = 1;
         } else {
-            goalHit = 0;
+            return goalHit = 0;
         }
+        
     }
     
     function unsafeAddToBalance(address user, address token, uint256 amount) internal {
@@ -772,6 +806,11 @@ contract AaveParty is ReentrancyGuard {
     function unsafeInternalTransfer(address from, address to, address token, uint256 amount) internal {
         unsafeSubtractFromBalance(from, token, amount);
         unsafeAddToBalance(to, token, amount);
+    }
+    
+    function abs(int x) internal pure returns (uint) {
+        
+        return uint(x) >= 0 ? uint(x) : uint(-x);
     }
 
     function fairShare(uint256 balance, uint256 shares, uint256 totalSharesAndLoot) internal pure returns (uint256) {
