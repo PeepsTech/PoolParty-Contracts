@@ -1,5 +1,5 @@
 
-### Welcome to the Pool-Party 
+# Welcome to the Pool-Party 
 
 Pool-Party DAOs are a fork of Molochv2 (https://github.com/MolochVentures/moloch) and owes a huge debt to the Moloch community and the devs that built Molochv1 and Molochv2. Pool-Parties take the Molochv2 code and allow for easier deposits for existing members, earnings / dividends, and a couple potential DeFi integrations (i.e. earn interest via Aave or Idle). Each type of party below has some unique attributes, so read more about them below. 
 
@@ -42,7 +42,7 @@ Party members may also `ragequit` and liquidate their internal `shares` and `loo
 
 Aave Party may also be used to fund other projects with aToken. 
 
-### License 
+## License 
 
 This code is offered without any warranties under the GPL-3.0 license:
 https://www.gnu.org/licenses/gpl-3.0.en.html
