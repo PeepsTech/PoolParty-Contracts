@@ -1,7 +1,148 @@
-   pragma solidity 0.6.12;
-   
+
+// File: browser/CloneFactory.sol
+
+/*
+The MIT License (MIT)
+Copyright (c) 2018 Murray Software, LLC.
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+contract CloneFactory { // Mystic implementation of eip-1167 - see https://eips.ethereum.org/EIPS/eip-1167
+    function createClone(address target) internal returns (address result) {
+        bytes20 targetBytes = bytes20(target);
+        assembly {
+            let clone := mload(0x40)
+            mstore(clone, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000)
+            mstore(add(clone, 0x14), targetBytes)
+            mstore(add(clone, 0x28), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+            result := create(0, clone, 0x37)
+        }
+    }
+}
+// File: browser/WETHParty.sol
+
+
+// File: contracts/oz/SafeMath.sol
+
+pragma solidity 0.6.12;
+
+library SafeMath {
+    function add(uint256 a, uint256 b) internal pure returns (uint256) {
+        uint256 c = a + b;
+        require(c >= a);
+
+        return c;
+    }
+    
+    function sub(uint256 a, uint256 b) internal pure returns (uint256) {
+        require(b <= a);
+        uint256 c = a - b;
+
+        return c;
+    }
+    
+    function mul(uint256 a, uint256 b) internal pure returns (uint256) {
+        if (a == 0) {
+            return 0;
+        }
+
+        uint256 c = a * b;
+        require(c / a == b);
+
+        return c;
+    }
+
+    function div(uint256 a, uint256 b) internal pure returns (uint256) {
+        require(b > 0);
+        uint256 c = a / b;
+
+        return c;
+    }
+    
+}
+
+library Address { // helper for address type - see openzeppelin-contracts/blob/master/contracts/utils/Address.sol
+    function isContract(address account) internal view returns (bool) {
+        bytes32 codehash;
+        bytes32 accountHash = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+        assembly { codehash := extcodehash(account) }
+        return (codehash != accountHash && codehash != 0x0);
+    }
+}
+
+// File: contracts/oz/IERC20.sol
+
+interface IERC20 { // brief interface for moloch erc20 token txs
+    function balanceOf(address who) external view returns (uint256);
+    
+    function transfer(address to, uint256 value) external returns (bool);
+
+    function transferFrom(address from, address to, uint256 value) external returns (bool);
+    
+    function approve(address spender, uint256 amount) external returns (bool);
+}
+
+library SafeERC20 { // wrapper around erc20 token tx for non-standard contract - see openzeppelin-contracts/blob/master/contracts/token/ERC20/SafeERC20.sol
+    using Address for address;
+    
+    function safeTransfer(IERC20 token, address to, uint256 value) internal {
+        _callOptionalReturn(token, abi.encodeWithSelector(token.transfer.selector, to, value));
+    }
+    
+    function safeTransferFrom(IERC20 token, address from, address to, uint256 value) internal {
+        _callOptionalReturn(token, abi.encodeWithSelector(token.transferFrom.selector, from, to, value));
+    }
+    
+    function _callOptionalReturn(IERC20 token, bytes memory data) private {
+        require(address(token).isContract(), "SafeERC20: call to non-contract");
+        (bool success, bytes memory returnData) = address(token).call(data);
+        require(success, "SafeERC20: low-level call failed");
+
+        if (returnData.length > 0) { // return data is optional
+            require(abi.decode(returnData, (bool)), "SafeERC20: erc20 operation did not succeed");
+        }
+    }
+}
+
+// File: contracts/oz/NewReentrancy.sol
+
+contract ReentrancyGuard { // call wrapper for reentrancy check
+    bool private _notEntered;
+
+    function _initReentrancyGuard () internal {
+        _notEntered = true;
+    }
+
+    modifier nonReentrant() {
+        require(_notEntered, "ReentrancyGuard: reentrant call");
+
+        _notEntered = false;
+
+        _;
+
+        _notEntered = true;
+    }
+}
+
+// File: contracts/CloneParty.sol
+
+
     /*=====================
-    WELCOME TO THE POOL Party vNoFi
+    WELCOME TO THE POOL Party vWETH
     
     **USE AT YOUR OWN RISK**
     Forked from an early version of the permissioned Mystic v2x by LexDAO 
@@ -396,7 +537,6 @@ contract NoFiParty is ReentrancyGuard {
                
                // update member iTB and iVal
                 if(proposal.sharesRequested > 0 || proposal.lootRequested > 0 && proposal.tributeToken == address(idleToken)){
-                    members[proposal.applicant].iTB += proposal.tributeOffered;
                     members[proposal.applicant].iVal += proposal.tributeOffered;
                 }
                 
@@ -405,7 +545,6 @@ contract NoFiParty is ReentrancyGuard {
                 members[proposal.applicant] = Member(proposal.sharesRequested, proposal.lootRequested, proposal.tributeOffered, 0, proposal.tributeOffered, 0, false, true);
                 
                 if (proposal.tributeToken == address(idleToken)){
-                    members[proposal.applicant].iTB += proposal.tributeOffered;
                     members[proposal.applicant].iVal += proposal.tributeOffered; 
                 }
                 memberList.push(proposal.applicant);
@@ -581,19 +720,25 @@ contract NoFiParty is ReentrancyGuard {
         for (uint256 i = 0; i < approvedTokens.length; i++) {
             uint256 amountToRagequit = fairShare(userTokenBalances[GUILD][approvedTokens[i]], sharesAndLootToBurn, initialTotalSharesAndLoot);
             if (amountToRagequit > 0) { // gas optimization to allow a higher maximum token limit
+                
+                uint256 defiAmtToRQ = fairShare(userTokenBalances[GUILD][address(idleToken)], sharesAndLootToBurn, initialTotalSharesAndLoot);
+                
                 userTokenBalances[GUILD][approvedTokens[i]] -= amountToRagequit;
                 userTokenBalances[memberAddress][approvedTokens[i]] += amountToRagequit;
-                subFees(GUILD, amountToRagequit, approvedTokens[i]);
-                totalDeposits -= int(amountToRagequit);
+                subFees(memberAddress, amountToRagequit, approvedTokens[i]);
                 // Only runs guild bank adjustment if member has withdrawn tokens.
                 // Otherwise, adjustment would end up costing member their fair share
                     
                  if(member.iTW > 0) {
                     // @Dev - SafeMath wasn't working here. 
-                     uint256 iAdj = member.iTW;
+                     uint256 iAdj = defiAmtToRQ.sub(member.iVal);
                      if(iAdj > 0) {
                         unsafeInternalTransfer(memberAddress, GUILD, address(idleToken), iAdj);
                      }
+                    totalDeposits -= int(defiAmtToRQ);
+                    totalDeposits += int(iAdj);
+                 } else {
+                    totalDeposits -= int(defiAmtToRQ);
                  }
                  
                 // Reset member-specific internal accting 
@@ -638,7 +783,6 @@ contract NoFiParty is ReentrancyGuard {
 
         // Accounting updates
         member.iTW += amount;
-        member.iTB -= amount;
         totalDeposits -= int(amount);
         unsafeInternalTransfer(GUILD, memberAddress, address(idleToken), earningsToUser);
     }
@@ -797,20 +941,22 @@ contract NoFiParty is ReentrancyGuard {
         uint256 mintedTokens = amount;
         
         // Update internal accounting
-        members[depositor].iTB += amount;
         members[depositor].iVal += amount;
         unsafeAddToBalance(GUILD, idleToken, mintedTokens);
         
         // Checks to see if goal has been reached with this deposit
-         goalHit = checkGoal();
+        goalHit = checkGoal();
+    
         
         emit MakeDeposit(depositor, amount, mintedTokens, shares, goalHit);
     }
     
     function checkGoal() public returns (uint8) {
         uint256 daoFunds = getUserTokenBalance(GUILD, idleToken);
-
-        if(daoFunds >= partyGoal){
+        
+        if(goalHit == 1){
+            return goalHit = 1;
+        } else if (daoFunds >= partyGoal){
             return goalHit = 1;
         } else {
             return goalHit = 0;
@@ -850,5 +996,61 @@ contract NoFiParty is ReentrancyGuard {
     function abs(int x) internal pure returns (uint) {
         
         return uint(x) >= 0 ? uint(x) : uint(-x);
+    }
+}
+
+// File: browser/WETHpartyStarter.sol
+
+// Kovan Weth Wrapper 0xd0A1E359811322d97991E03f863a0C30C2cF029C
+// Mainnet Weth Wrapper 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+
+//"SPDX-License-Identifier: MIT"
+
+pragma solidity 0.6.12;
+
+
+// ["0xd0A1E359811322d97991E03f863a0C30C2cF029C","0x4F96Fe3b7A6Cf9725f59d353F723c1bDb64CA6Aa"] kWETH, kDAI
+// ["0x0bA6142464b224abE3845b652B65162dBdF2A285","0x7136fbDdD4DFfa2369A9283B6E90A040318011Ca","0x3792acDf2A8658FBaDe0ea70C47b89cB7777A5a5"] test members
+// 1000000000000000000
+
+contract NoFiPartyStarter is CloneFactory {
+    
+    address public template;
+    
+    constructor (address _template) public {
+        template = _template;
+    }
+
+    
+    event PartyStarted(address indexed pty, address[] _founders, address[] _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDepositReward, uint256 _depositRate, uint256 _partyGoal, uint256 summoningTime, uint256 _dilutionBound);
+
+    function startParty(
+        address[] memory _founders,
+        address[] memory _approvedTokens, //deposit token in 0, WETH in 0
+        address _daoFees,
+        uint256 _periodDuration,
+        uint256 _votingPeriodLength,
+        uint256 _gracePeriodLength,
+        uint256 _proposalDepositReward,
+        uint256 _depositRate,
+        uint256 _partyGoal,
+        uint256 _dilutionBound
+    ) public returns (address) {
+       NoFiParty pty = NoFiParty(createClone(template));
+      
+       pty.init(
+            _founders,
+            _approvedTokens,
+            _daoFees,
+            _periodDuration,
+            _votingPeriodLength,
+            _gracePeriodLength,
+            _proposalDepositReward,
+            _depositRate,
+            _partyGoal,
+            _dilutionBound);
+        
+        emit PartyStarted(address(pty), _founders, _approvedTokens, _daoFees, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal, now, _dilutionBound);
+        return address(pty);
     }
 }
