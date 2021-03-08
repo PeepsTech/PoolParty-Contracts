@@ -331,7 +331,7 @@ contract WETHParty is ReentrancyGuard {
         
         // collect deposit from proposer
         require(IERC20(depositToken).transferFrom(msg.sender, address(this), proposalDepositReward), "proposal deposit failed");
-        unsafeAddToBalance(ESCROW, paymentToken, proposalDepositReward);
+        unsafeAddToBalance(ESCROW, depositToken, proposalDepositReward);
 
         
         // check whether pool goal is met before allowing spending proposals
@@ -510,7 +510,6 @@ contract WETHParty is ReentrancyGuard {
                
                // update member iTB and iVal
                 if(proposal.sharesRequested > 0 || proposal.lootRequested > 0){
-                    members[proposal.applicant].iTB += proposal.tributeOffered;
                     members[proposal.applicant].iVal += proposal.tributeOffered;
                 }
                 
@@ -688,24 +687,28 @@ contract WETHParty is ReentrancyGuard {
         totalShares = totalShares.sub(sharesToBurn);
         totalLoot = totalLoot.sub(lootToBurn);
         
-        uint256 feeEligible = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootToBurn, initialTotalSharesAndLoot).sub(member.iTB);
-        subFees(GUILD, feeEligible, address(wETH));
+        uint256 feeEligible = fairShare(userTokenBalances[GUILD][wETH], sharesAndLootToBurn, initialTotalSharesAndLoot).sub(member.iVal);
 
         for (uint256 i = 0; i < approvedTokens.length; i++) {
             uint256 amountToRagequit = fairShare(userTokenBalances[GUILD][approvedTokens[i]], sharesAndLootToBurn, initialTotalSharesAndLoot);
             if (amountToRagequit > 0) { // gas optimization to allow a higher maximum token limit
                 userTokenBalances[GUILD][approvedTokens[i]] -= amountToRagequit;
                 userTokenBalances[memberAddress][approvedTokens[i]] += amountToRagequit;
-                totalDeposits -= int(amountToRagequit);
+                subFees(memberAddress, feeEligible, address(wETH));
+
                 // Only runs guild bank adjustment if member has withdrawn tokens.
                 // Otherwise, adjustment would end up costing member their fair share
                     
                  if(member.iTW > 0) {
                     // @Dev - SafeMath wasn't working here. 
-                     uint256 iAdj = member.iTW;
+                     uint256 iAdj = feeEligible.sub(member.iVal);
                      if(iAdj > 0) {
                         unsafeInternalTransfer(memberAddress, GUILD, address(wETH), iAdj);
                      }
+                     totalDeposits -= int(amountToRagequit);
+                     totalDeposits += int(iAdj);
+                 } else {
+                    totalDeposits -= int(amountToRagequit);
                  }
                  
                 // Reset member-specific internal accting 
@@ -925,7 +928,9 @@ contract WETHParty is ReentrancyGuard {
     function checkGoal() public returns (uint8) {
         uint256 daoFunds = getUserTokenBalance(GUILD, wETH);
 
-        if(daoFunds >= partyGoal){
+        if(goalHit == 1){
+            return goalHit = 1;
+        } else if (daoFunds >= partyGoal){
             return goalHit = 1;
         } else {
             return goalHit = 0;
