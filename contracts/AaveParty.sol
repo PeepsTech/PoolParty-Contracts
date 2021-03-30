@@ -1,4 +1,5 @@
 pragma solidity 0.6.12;
+// SPDX-License-Identifier: GPLv3
 
 library SafeMath { // arithmetic wrapper for under/overflow check
     function add(uint256 a, uint256 b) internal pure returns (uint256) {
@@ -86,6 +87,7 @@ contract AaveParty is ReentrancyGuard {
 
     
     address public aave; // aave lending pool contract reference  
+    address public daoFees; // where fees go
     address public depositToken; // deposit token contract reference
     bool private initialized; // internally tracks deployment per eip-1167
 
@@ -181,9 +183,10 @@ contract AaveParty is ReentrancyGuard {
     /******************
     SUMMONING FUNCTIONS
     ******************/
-    constructor(
+    function init(
         address[] memory _founders,
         address[] memory _aTokens,
+        address _daoFees,
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
         uint256 _gracePeriodLength,
@@ -205,7 +208,7 @@ contract AaveParty is ReentrancyGuard {
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
         emit SummonComplete(_founders, _aTokens, block.timestamp, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
-        aave = 0xE0fBa4Fc209b4948668006B2bE61711b7f465bAe;
+        aave = 0xE0fBa4Fc209b4948668006B2bE61711b7f465bAe; //kovan 
         
         for (uint256 i = 0; i < _aTokens.length; i++) {
             address underlying = IAaveDepositWithdraw(_aTokens[i]).UNDERLYING_ASSET_ADDRESS();
@@ -228,6 +231,7 @@ contract AaveParty is ReentrancyGuard {
         proposalDepositReward = _proposalDepositReward;
         depositRate = _depositRate;
         partyGoal = _partyGoal;
+        daoFees = _daoFees;
         dilutionBound = _dilutionBound;
         summoningTime = block.timestamp;
         goalHit = 0;
@@ -658,8 +662,9 @@ contract AaveParty is ReentrancyGuard {
             
             IAaveDepositWithdraw(aave).withdraw(approvedTokens[i], amount[i], address(this));
             unsafeAddToBalance(msg.sender, approvedTokens[i], amount[i]);
+            subFees(msg.sender, amount[i], approvedTokens[i]);
             member.aTokenRedemptions[aTokens[i]] += amount[i];
-            
+
             emit WithdrawEarnings(msg.sender, claimable);
         }
     }
@@ -686,6 +691,24 @@ contract AaveParty is ReentrancyGuard {
         unsafeSubtractFromBalance(msg.sender, token, amount);
         require(IERC20(token).transfer(msg.sender, amount), "transfer failed");
         emit Withdraw(msg.sender, token, amount);
+    }
+    
+    function collectTokens(address token) public nonReentrant {
+        require(members[msg.sender].exists, "not member");
+        uint256 amountToCollect = IERC20(token).balanceOf(address(this)).sub(userTokenBalances[TOTAL][token]);
+        // only collect if 1) there are tokens to collect 2) token is whitelisted 3) token has non-zero balance
+        require(amountToCollect > 0, 'no tokens to collect');
+        require(tokenWhitelist[token], 'token to collect must be whitelisted');
+        require(userTokenBalances[GUILD][token] > 0 || approvedTokens.length < MAX_TOKEN_WHITELIST_COUNT, 'token to collect must have non-zero guild bank balance');
+        
+        unsafeAddToBalance(GUILD, token, amountToCollect);
+        emit TokensCollected(token, amountToCollect);
+    }
+    
+    function subFees(address holder, uint256 amount, address token) internal returns (uint256) {
+        uint256 poolFees = amount.div(uint256(1000).div(100)); // 10% fee on earnings
+        unsafeInternalTransfer(holder, daoFees, address(token), poolFees);
+        return amount.sub(poolFees);
     }
     
     function cancelProposal(uint256 proposalId) public nonReentrant {
@@ -827,3 +850,60 @@ contract AaveParty is ReentrancyGuard {
         return (balance / totalSharesAndLoot) * shares;
     } 
 } 
+
+contract CloneFactory { // Mystic implementation of eip-1167 - see https://eips.ethereum.org/EIPS/eip-1167
+    function createClone(address target) internal returns (address result) {
+        bytes20 targetBytes = bytes20(target);
+        assembly {
+            let clone := mload(0x40)
+            mstore(clone, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000)
+            mstore(add(clone, 0x14), targetBytes)
+            mstore(add(clone, 0x28), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+            result := create(0, clone, 0x37)
+        }
+    }
+}
+
+
+contract AavePartyStarter is CloneFactory {
+    
+    address public template;
+    
+    constructor (address _template) public {
+        template = _template;
+    }
+
+    
+    event PartyStarted(address indexed pty, address[] _founders, address[] _approvedTokens, address _daoFees, uint256 _periodDuration, uint256 _votingPeriodLength, uint256 _gracePeriodLength, uint256 _proposalDepositReward, uint256 _depositRate, uint256 _partyGoal, uint256 summoningTime, uint256 _dilutionBound);
+
+    function startParty(
+        address[] memory _founders,
+        address[] memory _approvedTokens, //deposit token in 0, idleToken in 1
+        address _daoFees,
+        uint256 _periodDuration,
+        uint256 _votingPeriodLength,
+        uint256 _gracePeriodLength,
+        uint256 _proposalDepositReward,
+        uint256 _depositRate,
+        uint256 _partyGoal,
+        uint256 _dilutionBound
+    ) public returns (address) {
+       AaveParty pty = AaveParty(createClone(template));
+      
+       pty.init(
+            _founders,
+            _approvedTokens,
+            _daoFees,
+            _periodDuration,
+            _votingPeriodLength,
+            _gracePeriodLength,
+            _proposalDepositReward,
+            _depositRate,
+            _partyGoal,
+            _dilutionBound);
+        
+        emit PartyStarted(address(pty), _founders, _approvedTokens, _daoFees, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal, now, _dilutionBound);
+        return address(pty);
+    }
+}
+
