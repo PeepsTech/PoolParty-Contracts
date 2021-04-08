@@ -67,7 +67,10 @@ interface IAaveDepositWithdraw {
     function withdraw(address token, uint256 amount, address destination) external;
     function getReservesList() external view returns (address[] memory);
     function getAssetsPrices(address[] calldata _assets) external view returns(uint256[] memory);
-    function UNDERLYING_ASSET_ADDRESS() external view returns (address);
+}
+
+interface IAaveData {
+    function getReserveTokensAddresses(address asset) external view returns (address aTokenAddress, address stableDebtTokenAddress, address variableDebtTokenAddress); 
 }
 
 contract AaveParty is ReentrancyGuard {
@@ -87,6 +90,7 @@ contract AaveParty is ReentrancyGuard {
 
     
     address public aave; // aave lending pool contract reference  
+    address public aaveData; // aave data provider for reference
     address public daoFees; // where fees go
     address public depositToken; // deposit token contract reference
     bool private initialized; // internally tracks deployment per eip-1167
@@ -185,7 +189,7 @@ contract AaveParty is ReentrancyGuard {
     ******************/
     function init(
         address[] memory _founders,
-        address[] memory _aTokens,
+        address[] memory _tokens,
         address _daoFees,
         uint256 _periodDuration,
         uint256 _votingPeriodLength,
@@ -201,23 +205,24 @@ contract AaveParty is ReentrancyGuard {
         require(_votingPeriodLength > 0, "_votingPeriodLength zeroed");
         require(_votingPeriodLength <= MAX_INPUT, "_votingPeriodLength maxed");
         require(_gracePeriodLength <= MAX_INPUT, "_gracePeriodLength maxed");
-        require(_aTokens.length > 0, "need token");
+        require(_tokens.length > 0, "need token");
         require(_depositRate > 0, "deposit rate zeroed");
         
-        depositToken = IAaveDepositWithdraw(_aTokens[0]).UNDERLYING_ASSET_ADDRESS(); // fetch underlying for base [0] aToken as deposit token
+        depositToken = _tokens[0]; // fetch underlying for base [0] aToken as deposit token
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
-        emit SummonComplete(_founders, _aTokens, block.timestamp, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
+        emit SummonComplete(_founders, _tokens, block.timestamp, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
         aave = 0xE0fBa4Fc209b4948668006B2bE61711b7f465bAe; //kovan 
+        aaveData = 0x3c73A5E5785cAC854D468F727c606C07488a29D6; //kovan
         
-        for (uint256 i = 0; i < _aTokens.length; i++) {
-            address underlying = IAaveDepositWithdraw(_aTokens[i]).UNDERLYING_ASSET_ADDRESS();
-            require(!tokenWhitelist[underlying], "duplicate approved token");
-            tokenWhitelist[underlying] = true;
-            approvedTokens.push(underlying);
-            aTokens.push(_aTokens[i]);
-            aTokenAssignments[underlying] = _aTokens[i]; // map underlying to aTokens
-            IERC20(underlying).approve(aave, uint256(-1)); // max approve aave for deposit into aToken from underlying
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            (address aToken,,) = IAaveData(aaveData).getReserveTokensAddresses(_tokens[i]);
+            require(!tokenWhitelist[aToken], "duplicate approved token");
+            tokenWhitelist[aToken] = true;
+            approvedTokens.push(aToken);
+            approvedTokens.push(_tokens[i]);
+            aTokenAssignments[_tokens[i]] = aTokens[i]; // map underlying to aTokens
+            IERC20(_tokens[i]).approve(aave, uint256(-1)); // max approve aave for deposit into aToken from underlying
         }
         
         for (uint256 i = 0; i < _founders.length; i++) {
@@ -287,7 +292,6 @@ contract AaveParty is ReentrancyGuard {
         } 
         
         else if (flagNumber == 7) { // for amend governance use applicant for aToken (e.g., aDAI), tributeOffered for partyGoal, paymentRequested for depositRate, tributeToken for aToken underlying (e.g., DAI), paymentToken for new aave
-            require(tributeToken == IAaveDepositWithdraw(applicant).UNDERLYING_ASSET_ADDRESS()); // sanity check 
             _submitProposal(applicant, 0, 0, tributeOffered, tributeToken, paymentRequested, paymentToken, details, flags);
         } 
         
@@ -537,7 +541,9 @@ contract AaveParty is ReentrancyGuard {
                 require(approvedTokens.length < MAX_TOKEN_WHITELIST_COUNT, "too many tokens already");
                 approvedTokens.push(proposal.tributeToken);
                 tokenWhitelist[proposal.tributeToken] = true;
-                aTokenAssignments[proposal.tributeToken] = proposal.applicant; // map underlying to aToken
+                (address aToken,,) = IAaveData(aaveData).getReserveTokensAddresses(proposal.tributeToken);
+                approvedTokens.push(aToken);
+                tokenWhitelist[aToken] = true;
                 IERC20(proposal.tributeToken).approve(aave, uint256(-1)); // max approve underlying to aave for deposit into aToken
             }
             
