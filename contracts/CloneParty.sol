@@ -1,8 +1,92 @@
-pragma solidity ^0.5.17;
+pragma solidity ^0.6.12;
 
-import "./SafeMath.sol";
-import "./IERC20.sol";
-import "./NewReentrancy.sol";
+import "./ReentrancyGuard.sol";
+import './IERC20.sol';
+import './SafeMath.sol';
+
+interface IIdleToken {
+  function token() external returns (address underlying);
+  function fee() external view returns (uint256 fee);
+  function govTokens(uint256) external returns (address govToken);
+  function userAvgPrices(address user) external view returns (uint256 price);
+  function mintIdleToken(uint256 _amount, bool _skipWholeRebalance, address _referral) external returns (uint256 mintedTokens);
+  function redeemIdleToken(uint256 _amount) external returns (uint256 redeemedTokens);
+  function redeemInterestBearingTokens(uint256 _amount) external;
+  function rebalance() external returns (bool);
+  function rebalanceWithGST() external returns (bool);
+  function tokenPrice() external view returns (uint256 price);
+  function getAPRs() external view returns (address[] memory addresses, uint256[] memory aprs);
+  function getAvgAPR() external view returns (uint256 avgApr);
+  function getGovTokensAmounts(address _usr) external view returns (uint256[] memory _amounts);
+}
+
+
+
+contract IdleTokenHelper {
+    using SafeMath for uint256;
+
+    uint256 constant public FULL_ALLOC = 100000;
+
+    function getMintingPrice(address idleYieldToken) view external returns (uint256 mintingPrice) {
+        return _getMintingPrice(idleYieldToken);
+    }
+
+    function _getMintingPrice(address idleYieldToken) view internal returns (uint256 mintingPrice) {
+        return IIdleToken(idleYieldToken).tokenPrice();
+    }
+
+    function getRedeemPrice(address idleYieldToken) view external returns (uint256 redeemPrice) {
+        return _getRedeemPrice(idleYieldToken, msg.sender);
+    }
+
+    function getRedeemPrice(address idleYieldToken, address user) view external returns (uint256 redeemPrice) {
+        return _getRedeemPrice(idleYieldToken, user);
+    }
+
+    function _getRedeemPrice(address idleYieldToken, address user) view internal returns (uint256 redeemPrice) {
+        /*
+         *  As per https://github.com/Idle-Labs/idle-contracts/blob/ad0f18fef670ea6a4030fe600f64ece3d3ac2202/contracts/IdleTokenGovernance.sol#L878-L900
+         *
+         *  Price on minting is currentPrice
+         *  Price on redeem must consider the fee
+         *
+         *  Below the implementation of the following redeemPrice formula
+         *
+         *  redeemPrice := underlyingAmount/idleTokenAmount
+         *
+         *  redeemPrice = currentPrice * (1 - scaledFee * ΔP%)
+         *
+         *  where:
+         *  - scaledFee   := fee/FULL_ALLOC
+         *  - ΔP% := 0 when currentPrice < userAvgPrice (no gain) and (currentPrice-userAvgPrice)/currentPrice
+         *
+         *  n.b: gain := idleTokenAmount * ΔP% * currentPrice
+         */
+
+        IIdleToken iyt = IIdleToken(idleYieldToken);
+
+        uint256 userAvgPrice = iyt.userAvgPrices(user);
+        uint256 currentPrice = iyt.tokenPrice();
+
+        // When no deposits userAvgPrice is 0 equiv currentPrice
+        // and in the case of issues
+        if (userAvgPrice == 0 || currentPrice < userAvgPrice) {
+            redeemPrice = currentPrice;
+        } else {
+            uint256 fee = iyt.fee();
+
+            redeemPrice = ((currentPrice.mul(FULL_ALLOC))
+                .sub(
+                    fee.mul(
+                         currentPrice.sub(userAvgPrice)
+                    )
+                )).div(FULL_ALLOC);
+        }
+
+        return redeemPrice;
+    }
+}
+
 
     /*=====================
     WELCOME TO THE POOL Party v1
@@ -16,24 +100,8 @@ import "./NewReentrancy.sol";
     Definitely NO WARRANTIES.
     =======================*/
 
-interface IIdleToken {
-  function token() external returns (address underlying);
-  function govTokens(uint256) external returns (address govToken);
-  function userAvgPrices(address) external returns (uint256 avgPrice);
-  function mintIdleToken(uint256 _amount, bool _skipWholeRebalance, address _referral) external returns (uint256 mintedTokens);
-  function redeemIdleToken(uint256 _amount) external returns (uint256 redeemedTokens);
-  function redeemInterestBearingTokens(uint256 _amount) external;
-  function rebalance() external returns (bool);
-  function rebalanceWithGST() external returns (bool);
-  function tokenPrice() external view returns (uint256 price);
-  function getAPRs() external view returns (address[] memory addresses, uint256[] memory aprs);
-  function getAvgAPR() external view returns (uint256 avgApr);
-  function getGovTokensAmounts(address _usr) external view returns (uint256[] memory _amounts);
-}
 
-
-contract Party is ReentrancyGuard {
-    using SafeMath for uint256;
+contract Party is ReentrancyGuard, IdleTokenHelper {
 
     
     /****************
@@ -98,6 +166,8 @@ contract Party is ReentrancyGuard {
     address public constant ESCROW = address(0xbeef);
     address public constant TOTAL = address(0xbabe);
     mapping(address => mapping(address => uint256)) public userTokenBalances; // userTokenBalances[userAddress][tokenAddress]
+    mapping(address => mapping(uint256 => Deposit)) public deposits; // tracks each user deposit for earnings deposits[user][number]
+
 
     enum Vote {
         Null, // default value, counted as abstention
@@ -108,12 +178,19 @@ contract Party is ReentrancyGuard {
     struct Member {
         uint256 shares; // the # of voting shares assigned to this member
         uint256 loot; // the loot amount available to this member (combined with shares on ragequit)
-        uint256 iTB; // iToken Balance
-        uint256 iTW; // iToken withdrawals
-        uint256 iVal; // base value off which earnings are calculated
+        uint256 iTB; // Total iToken Balance
+        uint256 iTW; // Total iToken withdrawals
+        uint256 iVal; // Total stable coin deposits
+        uint256 depositCount; // tracks number of deposits
         uint256 highestIndexYesVote; // highest proposal index # on which the member voted YES
         bool jailed; // set to proposalIndex of a passing guild kick proposal for this member, prevents voting on and sponsoring proposals
         bool exists; // always true once a member has been created
+    }
+    
+    struct Deposit {
+        uint256 amount; // amount of deposit
+        uint256 mintedTokens; // minted iTokens from deposit
+        uint256 iPrice; // iToken price at time of purchase
     }
 
     struct Proposal {
@@ -145,8 +222,7 @@ contract Party is ReentrancyGuard {
 
     mapping(uint256 => Proposal) public proposals;
     uint256[] public proposalQueue;
-    mapping(uint256 => bytes) public actions; // proposalId => action data
-
+    
     
     /******************
     SUMMONING FUNCTIONS
@@ -174,7 +250,7 @@ contract Party is ReentrancyGuard {
         depositToken = _approvedTokens[0];
         idleToken = _approvedTokens[1];
         // NOTE: move event up here, avoid stack too deep if too many approved tokens
-        emit SummonComplete(_founders, _approvedTokens, now, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
+        emit SummonComplete(_founders, _approvedTokens, block.timestamp, _periodDuration, _votingPeriodLength, _gracePeriodLength, _proposalDepositReward, _depositRate, _partyGoal);
         
         for (uint256 i = 0; i < _approvedTokens.length; i++) {
             require(!tokenWhitelist[_approvedTokens[i]], "token duplicated");
@@ -193,7 +269,7 @@ contract Party is ReentrancyGuard {
         proposalDepositReward = _proposalDepositReward;
         depositRate = _depositRate;
         partyGoal = _partyGoal;
-        summoningTime = now;
+        summoningTime = block.timestamp;
         goalHit = 0;
         dilutionBound = _dilutionBound;
         
@@ -202,8 +278,9 @@ contract Party is ReentrancyGuard {
     
     
     function _addFounder(address founder) internal {
-            members[founder] = Member(0, 0, 0, 0, 0, 0, false, true);
+            members[founder] = Member(0, 0, 0, 0, 0, 0, 0, false, true);
             memberList.push(founder);
+
     }
     
     // Can also be used to upgrade the idle contract, but not switch to new DeFi token (ie. iDAI to iUSDC)
@@ -226,7 +303,7 @@ contract Party is ReentrancyGuard {
         address paymentToken,
         bytes32 details
     ) public nonReentrant returns (uint256 proposalId) {
-        require(sharesRequested.add(lootRequested) <= MAX_INPUT, "shares maxed");
+        require(sharesRequested + (lootRequested) <= MAX_INPUT, "shares maxed");
         if(flagNumber != 7){
             require(tokenWhitelist[tributeToken] && tokenWhitelist[paymentToken], "tokens not whitelisted");
             // collect tribute from proposer and store it in the Moloch until the proposal is processed
@@ -388,6 +465,7 @@ contract Party is ReentrancyGuard {
 
         uint256 proposalId = proposalQueue[proposalIndex];
         Proposal storage proposal = proposals[proposalId];
+        uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
         
         //[sponsored -0 , processed -1, didPass -2, cancelled -3, guildkick -4, spending -5, member -6, governance -7]
         require(!proposal.flags[4] && !proposal.flags[7], "not standard proposal"); 
@@ -418,7 +496,7 @@ contract Party is ReentrancyGuard {
             // the applicant is a new member, create a new record for them
             } else {
 
-                members[proposal.applicant] = Member(proposal.sharesRequested, proposal.lootRequested, 0, 0, 0, 0, false, true);
+                members[proposal.applicant] = Member(proposal.sharesRequested, proposal.lootRequested, 0, 0, 0, 1, 0, false, true);
                 memberList.push(proposal.applicant);
             }
 
@@ -439,7 +517,6 @@ contract Party is ReentrancyGuard {
              }
             
              if (proposal.paymentToken == depositToken && proposal.paymentRequested > 0 ){
-                uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
                 uint256 idleToConvert = proposal.paymentRequested.div(iTokenPrice);
                 uint256 idleRedemptionAmt = subFees(GUILD, idleToConvert);
                 
@@ -771,7 +848,14 @@ contract Party is ReentrancyGuard {
     HELPER FUNCTIONS
     ***************/
     
-    function getUserEarnings(uint256 amount) public returns (uint256) {
+    function getUserEarnings(address memberAddress) public view returns (uint256) {
+        
+        uint256 depositCount = members[memberAddress].depositCount;
+        for (uint256 i = 0; i < depositCount; i++) {
+            
+        }
+        
+        
         uint256 userBalance = amount;
         uint256 avgCost = userBalance.mul(IIdleToken(idleToken).userAvgPrices(address(this))).div(10**18);
         uint256 currentValue = userBalance.mul(IIdleToken(idleToken).tokenPrice()).div(10**18);
@@ -811,10 +895,17 @@ contract Party is ReentrancyGuard {
         // Token is the deposit token (eg. DAI)
         require(IERC20(depositToken).approve(address(idleToken), amount), 'approval failed');
         uint256 mintedTokens = IIdleToken(idleToken).mintIdleToken(amount, true, depositor);
+        uint256 iTokenPrice = IIdleToken(idleToken).tokenPrice();
+
         
         // Update internal accounting
         members[depositor].iTB += mintedTokens;
         members[depositor].iVal += amount;
+    
+        // Save deposit info 
+        members[depositor].depositCount += 1;
+        uint256 depositCount = members[depositor].depositCount;
+        deposits[depositor][depositCount] = Deposit(amount, mintedTokens, iTokenPrice);
         unsafeAddToBalance(GUILD, idleToken, mintedTokens);
         
         // Checks to see if goal has been reached with this deposit
@@ -830,7 +921,9 @@ contract Party is ReentrancyGuard {
         uint256 daoFunds = getUserTokenBalance(GUILD, idleToken);
         uint256 idleValue = getIdleValue(daoFunds);
         
-        if(idleValue >= partyGoal){
+        if(goalHit == 1){
+            return goalHit = 1;
+        } else if (idleValue >= partyGoal){
             return goalHit = 1;
         } else {
             return goalHit = 0;
@@ -866,4 +959,4 @@ contract Party is ReentrancyGuard {
 
         return (balance / totalSharesAndLoot) * shares;
     } 
-}    
+}
